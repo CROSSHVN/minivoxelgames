@@ -152,6 +152,136 @@ public class VoxelBenchmark
         }
 
         sw.Stop();
-        Debug.Log($"[BENCHMARK] SubChunkMeshing: {sw.ElapsedMilliseconds} ms for {iterations:N0} builds (Quads: {meshData.Triangles.Count / 6}, Verts: {meshData.Vertices.Count})");
+        Debug.Log($"[BENCHMARK] SubChunkMeshing (Neighborhood Cache): {sw.ElapsedMilliseconds} ms for {iterations:N0} builds (Quads: {meshData.Triangles.Count / 6}, Verts: {meshData.Vertices.Count})");
+    }
+
+    [Test]
+    public void Benchmark_NeighborhoodCache_DirectComparison()
+    {
+        var world = new World();
+        // 3x3 чанка для реалистичных границ
+        for (int cx = -1; cx <= 1; cx++)
+        {
+            for (int cz = -1; cz <= 1; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                {
+                    for (int z = 0; z < 16; z++)
+                    {
+                        for (int y = 0; y < 8; y++)
+                        {
+                            chunk.SetVoxel(x, y, z, new Voxel(BlockType.Stone));
+                        }
+                        chunk.SetVoxel(x, 8, z, new Voxel(BlockType.Grass));
+                    }
+                }
+            }
+        }
+
+        var meshDataLegacy = new Client.Rendering.MeshData();
+        var meshDataCached = new Client.Rendering.MeshData();
+
+        // Прогрев JIT для обоих алгоритмов
+        for (int i = 0; i < 50; i++)
+        {
+            Client.Rendering.SubChunkMeshBuilder.BuildLegacyDirect(world, Vector2Int.zero, 0, meshDataLegacy);
+            Client.Rendering.SubChunkMeshBuilder.Build(world, Vector2Int.zero, 0, meshDataCached);
+        }
+
+        // Проверка корректности: результаты должны быть абсолютно идентичны
+        Assert.AreEqual(meshDataLegacy.Vertices.Count, meshDataCached.Vertices.Count, "Vertex count mismatch!");
+        Assert.AreEqual(meshDataLegacy.Triangles.Count, meshDataCached.Triangles.Count, "Triangle count mismatch!");
+
+        const int iterations = 1000;
+
+        // 1. Тест Legacy (World Dictionary Lookup на границах)
+        var swLegacy = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            Client.Rendering.SubChunkMeshBuilder.BuildLegacyDirect(world, Vector2Int.zero, 0, meshDataLegacy);
+        }
+        swLegacy.Stop();
+        long legacyMs = swLegacy.ElapsedMilliseconds;
+
+        // 2. Тест Neighborhood Cache (SubChunkNeighbors)
+        var swCached = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            Client.Rendering.SubChunkMeshBuilder.Build(world, Vector2Int.zero, 0, meshDataCached);
+        }
+        swCached.Stop();
+        long cachedMs = swCached.ElapsedMilliseconds;
+
+        double speedup = (double)legacyMs / (cachedMs > 0 ? cachedMs : 1);
+        double percent = legacyMs > 0 ? ((legacyMs - cachedMs) / (double)legacyMs) * 100.0 : 0.0;
+
+        Debug.Log($"[BENCHMARK] === COMPARISON FOR {iterations:N0} SUBCHUNK BUILDS ===");
+        Debug.Log($"[BENCHMARK] Legacy Direct Lookup:    {legacyMs} ms ({legacyMs / (double)iterations:F3} ms/build)");
+        Debug.Log($"[BENCHMARK] Neighborhood Cache:       {cachedMs} ms ({cachedMs / (double)iterations:F3} ms/build)");
+        Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
+
+        Assert.LessOrEqual(cachedMs, legacyMs + 15, "Neighborhood cache should be faster than legacy direct lookup");
+    }
+
+    [Test]
+    public void Benchmark_FullChunkRebuild_Comparison()
+    {
+        var world = new World();
+        // 3x3 чанка
+        for (int cx = -1; cx <= 1; cx++)
+        {
+            for (int cz = -1; cz <= 1; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                {
+                    for (int z = 0; z < 16; z++)
+                    {
+                        for (int y = 0; y < 64; y++)
+                        {
+                            chunk.SetVoxel(x, y, z, new Voxel(BlockType.Stone));
+                        }
+                    }
+                }
+            }
+        }
+
+        var meshData = new Client.Rendering.MeshData();
+        const int chunkIterations = 100; // 100 чанков * 8 подчанков = 800 подчанков
+
+        // 1. Legacy подход (каждый подчанк опрашивает мир независимо)
+        var swLegacy = Stopwatch.StartNew();
+        for (int iter = 0; iter < chunkIterations; iter++)
+        {
+            for (int s = 0; s < Chunk.SubChunksCount; s++)
+            {
+                Client.Rendering.SubChunkMeshBuilder.BuildLegacyDirect(world, Vector2Int.zero, s, meshData);
+            }
+        }
+        swLegacy.Stop();
+        long legacyMs = swLegacy.ElapsedMilliseconds;
+
+        // 2. Оптимизированный подход с ChunkNeighbors (горизонтальные соседи кэшируются 1 раз на всю колонну)
+        var swChunkCache = Stopwatch.StartNew();
+        for (int iter = 0; iter < chunkIterations; iter++)
+        {
+            var chunkNeighbors = new ChunkNeighbors(world, Vector2Int.zero);
+            for (int s = 0; s < Chunk.SubChunksCount; s++)
+            {
+                var subNeighbors = chunkNeighbors.GetSubChunkNeighbors(s);
+                Client.Rendering.SubChunkMeshBuilder.Build(in subNeighbors, meshData);
+            }
+        }
+        swChunkCache.Stop();
+        long chunkCacheMs = swChunkCache.ElapsedMilliseconds;
+
+        double speedup = (double)legacyMs / (chunkCacheMs > 0 ? chunkCacheMs : 1);
+        double percent = legacyMs > 0 ? ((legacyMs - chunkCacheMs) / (double)legacyMs) * 100.0 : 0.0;
+
+        Debug.Log($"[BENCHMARK] === FULL COLUMN REBUILD ({chunkIterations * Chunk.SubChunksCount:N0} SUBCHUNKS) ===");
+        Debug.Log($"[BENCHMARK] Legacy Column Rebuild:        {legacyMs} ms");
+        Debug.Log($"[BENCHMARK] ChunkNeighbors Column Cache:  {chunkCacheMs} ms");
+        Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
     }
 }

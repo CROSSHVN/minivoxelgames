@@ -151,14 +151,98 @@ namespace Client.Rendering
     }
 
     /// <summary>
-    /// Процедурный генератор полигональной сетки подчанка с гибридным Face Culling.
+    /// Процедурный генератор полигональной сетки подчанка с гибридным Face Culling и Neighborhood Cache.
     /// </summary>
     public static class SubChunkMeshBuilder
     {
         /// <summary>
-        /// Построение меша для указанного подчанка в мире.
+        /// Построение меша для указанного подчанка в мире (создает кэш соседей и строит меш).
         /// </summary>
         public static void Build(World world, Vector2Int chunkCoord, int subChunkIndex, MeshData meshData)
+        {
+            var neighbors = SubChunkNeighbors.Create(world, chunkCoord, subChunkIndex);
+            Build(in neighbors, meshData);
+        }
+
+        /// <summary>
+        /// Высокопроизводительное построение меша с использованием кэша соседей (Neighborhood Cache).
+        /// Полностью исключает обращения к словарю мира и вычисление глобальных координат в цикле обхода вокселей.
+        /// </summary>
+        public static void Build(in SubChunkNeighbors neighbors, MeshData meshData)
+        {
+            meshData.Clear();
+
+            SubChunk center = neighbors.Center;
+            if (center == null)
+            {
+                return;
+            }
+
+            // Порядок циклов: Y (слой) -> Z (глубина) -> X (строка).
+            // Строго совпадает с плоским индексом в массиве: x + (z << 4) + (y << 8),
+            // обеспечивая последовательный доступ к кэш-линиям процессора (L1 data cache hit).
+            for (int y = 0; y < SubChunk.Size; y++)
+            {
+                for (int z = 0; z < SubChunk.Size; z++)
+                {
+                    for (int x = 0; x < SubChunk.Size; x++)
+                    {
+                        Voxel voxel = center.GetVoxel(x, y, z);
+                        if (voxel.IsAir)
+                        {
+                            continue;
+                        }
+
+                        // 1. Up (+Y)
+                        bool isUpAir = (y < SubChunk.Size - 1)
+                            ? center.GetVoxel(x, y + 1, z).IsAir
+                            : neighbors.GetUp(x, z).IsAir;
+                        if (isUpAir)
+                            meshData.AddFace(x, y, z, BlockFace.Up, voxel.Type);
+
+                        // 2. Down (-Y)
+                        bool isDownAir = (y > 0)
+                            ? center.GetVoxel(x, y - 1, z).IsAir
+                            : neighbors.GetDown(x, z).IsAir;
+                        if (isDownAir)
+                            meshData.AddFace(x, y, z, BlockFace.Down, voxel.Type);
+
+                        // 3. North (+Z)
+                        bool isNorthAir = (z < SubChunk.Size - 1)
+                            ? center.GetVoxel(x, y, z + 1).IsAir
+                            : neighbors.GetNorth(x, y).IsAir;
+                        if (isNorthAir)
+                            meshData.AddFace(x, y, z, BlockFace.North, voxel.Type);
+
+                        // 4. South (-Z)
+                        bool isSouthAir = (z > 0)
+                            ? center.GetVoxel(x, y, z - 1).IsAir
+                            : neighbors.GetSouth(x, y).IsAir;
+                        if (isSouthAir)
+                            meshData.AddFace(x, y, z, BlockFace.South, voxel.Type);
+
+                        // 5. East (+X)
+                        bool isEastAir = (x < SubChunk.Size - 1)
+                            ? center.GetVoxel(x + 1, y, z).IsAir
+                            : neighbors.GetEast(y, z).IsAir;
+                        if (isEastAir)
+                            meshData.AddFace(x, y, z, BlockFace.East, voxel.Type);
+
+                        // 6. West (-X)
+                        bool isWestAir = (x > 0)
+                            ? center.GetVoxel(x - 1, y, z).IsAir
+                            : neighbors.GetWest(y, z).IsAir;
+                        if (isWestAir)
+                            meshData.AddFace(x, y, z, BlockFace.West, voxel.Type);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Прямое построение без предварительного кэша соседей (для обратной совместимости и сравнительных бенчмарков).
+        /// </summary>
+        public static void BuildLegacyDirect(World world, Vector2Int chunkCoord, int subChunkIndex, MeshData meshData)
         {
             meshData.Clear();
 

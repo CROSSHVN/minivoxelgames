@@ -43,13 +43,16 @@ namespace Client.Rendering
         }
 
         /// <summary>
-        /// Перестроение мешей всех 8 подчанков чанка.
+        /// Перестроение мешей всех 8 подчанков чанка с использованием кэша соседних чанков (ChunkNeighbors).
+        /// Исключает повторный опрос словаря мира для каждого подчанка.
         /// </summary>
         public void Rebuild(World world)
         {
+            var chunkNeighbors = new ChunkNeighbors(world, Coord);
             for (int i = 0; i < Chunk.SubChunksCount; i++)
             {
-                RebuildSubChunk(i, world);
+                var subNeighbors = chunkNeighbors.GetSubChunkNeighbors(i);
+                RebuildSubChunkWithNeighbors(i, in subNeighbors);
             }
         }
 
@@ -63,7 +66,21 @@ namespace Client.Rendering
                 return;
             }
 
-            SubChunkMeshBuilder.Build(world, Coord, subIndex, _reusableMeshData);
+            var neighbors = SubChunkNeighbors.Create(world, Coord, subIndex);
+            RebuildSubChunkWithNeighbors(subIndex, in neighbors);
+        }
+
+        /// <summary>
+        /// Перестроение меша подчанка с готовым кэшем соседей.
+        /// </summary>
+        public void RebuildSubChunkWithNeighbors(int subIndex, in SubChunkNeighbors neighbors)
+        {
+            if (_subViews == null || subIndex < 0 || subIndex >= Chunk.SubChunksCount)
+            {
+                return;
+            }
+
+            SubChunkMeshBuilder.Build(in neighbors, _reusableMeshData);
             _subViews[subIndex].ApplyMeshData(_reusableMeshData, _material);
         }
     }

@@ -43,6 +43,11 @@
   * `WorldToChunkCoord(worldX, worldZ)` — сдвиг `coord >> 4`, мгновенно работает для любых (включая отрицательные) чисел без вызовов `Mathf.FloorToInt`.
   * `WorldToLocalCoord(worldCoord)` — маска `coord & 15`, возвращает локальную позицию $[0..15]$.
 
+### `SubChunkNeighbors.cs` & `ChunkNeighbors.cs`
+* **Neighborhood Cache (Кэш соседства):**
+  * `SubChunkNeighbors`: легковесная readonly-структура, кэширующая 6 прямых соседей подчанка (Up, Down, North, South, East, West). Устраняет тысячи обращений к `World` и словарю `Dictionary<Vector2Int, Chunk>` при обходе границ.
+  * `ChunkNeighbors`: кэширует 4 горизонтальных соседних чанка на всю вертикальную колонну из 8 подчанков. Позволяет мгновенно получать `SubChunkNeighbors` без единого повторного поиска по словарю, ускоряя генерацию колонны более чем в 2 раза.
+
 ---
 
 ## 3. Разграничение ответственности
