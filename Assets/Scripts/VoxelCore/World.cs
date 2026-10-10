@@ -14,32 +14,77 @@ namespace VoxelCore
     {
         private readonly Dictionary<Vector2Int, Chunk> _chunks = new Dictionary<Vector2Int, Chunk>();
 
+        // L1-кэш последнего запрошенного чанка (Minecraft 1.8.9 pattern).
+        // Обеспечивает O(1) доступ без обращения к хэш-таблице для локализованных запросов (физика, рейкаст, генерация).
+        private int _cachedChunkX = int.MinValue;
+        private int _cachedChunkZ = int.MinValue;
+        private Chunk _cachedChunk;
+
         /// <summary>
         /// Количество загруженных в данный момент чанков.
         /// </summary>
         public int LoadedChunksCount => _chunks.Count;
 
         /// <summary>
+        /// Сбрасывает L1-кэш чанка.
+        /// </summary>
+        public void InvalidateChunkCache()
+        {
+            _cachedChunkX = int.MinValue;
+            _cachedChunkZ = int.MinValue;
+            _cachedChunk = null;
+        }
+
+        /// <summary>
         /// Возвращает существующий чанк или создает новый, если его еще нет в мире.
         /// </summary>
         public Chunk GetOrCreateChunk(Vector2Int coord)
         {
-            if (_chunks.TryGetValue(coord, out Chunk chunk))
+            if (TryGetChunk(coord.x, coord.y, out Chunk chunk))
             {
                 return chunk;
             }
 
             chunk = new Chunk(coord);
             _chunks.Add(coord, chunk);
+            _cachedChunkX = coord.x;
+            _cachedChunkZ = coord.y;
+            _cachedChunk = chunk;
             return chunk;
         }
 
         /// <summary>
-        /// Попытка получить чанк по координатам сетки чанков.
+        /// Попытка получить чанк по координатам сетки чанков Vector2Int.
+        /// Использует L1-кэш для быстрого доступа.
         /// </summary>
         public bool TryGetChunk(Vector2Int coord, out Chunk chunk)
         {
-            return _chunks.TryGetValue(coord, out chunk);
+            return TryGetChunk(coord.x, coord.y, out chunk);
+        }
+
+        /// <summary>
+        /// Попытка получить чанк по целочисленным координатам сетки (chunkX, chunkZ).
+        /// Исключает создание структуры Vector2Int и использует быстрый L1-кэш.
+        /// </summary>
+        public bool TryGetChunk(int chunkX, int chunkZ, out Chunk chunk)
+        {
+            if (chunkX == _cachedChunkX && chunkZ == _cachedChunkZ && _cachedChunk != null)
+            {
+                chunk = _cachedChunk;
+                return true;
+            }
+
+            Vector2Int coord = new Vector2Int(chunkX, chunkZ);
+            if (_chunks.TryGetValue(coord, out chunk))
+            {
+                _cachedChunkX = chunkX;
+                _cachedChunkZ = chunkZ;
+                _cachedChunk = chunk;
+                return true;
+            }
+
+            chunk = null;
+            return false;
         }
 
         #region Voxel Access
@@ -47,10 +92,36 @@ namespace VoxelCore
         /// <summary>
         /// Чтение вокселя по глобальным координатам мира (X, Y, Z).
         /// Если чанк не загружен или Y выходит за пределы [0..127], возвращает Voxel.Air.
+        /// Использует быстрый L1-кэш чанка (Minecraft 1.8.9).
         /// </summary>
         public Voxel GetVoxel(int worldX, int worldY, int worldZ)
         {
             // Проверка высоты мира
+            if (worldY < 0 || worldY >= Chunk.Height)
+            {
+                return Voxel.Air;
+            }
+
+            int chunkX = worldX >> SubChunk.Shift;
+            int chunkZ = worldZ >> SubChunk.Shift;
+
+            if (!TryGetChunk(chunkX, chunkZ, out Chunk chunk))
+            {
+                return Voxel.Air;
+            }
+
+            int localX = worldX & SubChunk.Mask;
+            int localZ = worldZ & SubChunk.Mask;
+
+            return chunk.GetVoxel(localX, worldY, localZ);
+        }
+
+        /// <summary>
+        /// Прямое чтение вокселя через Dictionary без использования L1-кэша.
+        /// Используется для эталонных сравнительных замеров производительности (A/B бенчмарки).
+        /// </summary>
+        public Voxel GetVoxelLegacyDirect(int worldX, int worldY, int worldZ)
+        {
             if (worldY < 0 || worldY >= Chunk.Height)
             {
                 return Voxel.Air;
@@ -88,14 +159,16 @@ namespace VoxelCore
                 return false;
             }
 
-            Vector2Int chunkCoord = WorldToChunkCoord(worldX, worldZ);
-            if (!_chunks.TryGetValue(chunkCoord, out Chunk chunk))
+            int chunkX = worldX >> SubChunk.Shift;
+            int chunkZ = worldZ >> SubChunk.Shift;
+
+            if (!TryGetChunk(chunkX, chunkZ, out Chunk chunk))
             {
                 return false;
             }
 
-            int localX = WorldToLocalCoord(worldX);
-            int localZ = WorldToLocalCoord(worldZ);
+            int localX = worldX & SubChunk.Mask;
+            int localZ = worldZ & SubChunk.Mask;
 
             chunk.SetVoxel(localX, worldY, localZ, voxel);
             return true;
@@ -151,7 +224,8 @@ namespace VoxelCore
                 return;
             }
 
-            Vector2Int lastChunkCoord = new Vector2Int(int.MinValue, int.MinValue);
+            int lastChunkX = int.MinValue;
+            int lastChunkZ = int.MinValue;
             Chunk cachedChunk = null;
 
             for (int y = minY; y <= maxY; y++)
@@ -164,12 +238,12 @@ namespace VoxelCore
                     for (int z = minZ; z <= maxZ; z++)
                     {
                         int chunkZ = z >> SubChunk.Shift;
-                        Vector2Int chunkCoord = new Vector2Int(chunkX, chunkZ);
 
-                        if (chunkCoord != lastChunkCoord)
+                        if (chunkX != lastChunkX || chunkZ != lastChunkZ)
                         {
-                            lastChunkCoord = chunkCoord;
-                            _chunks.TryGetValue(chunkCoord, out cachedChunk);
+                            lastChunkX = chunkX;
+                            lastChunkZ = chunkZ;
+                            TryGetChunk(chunkX, chunkZ, out cachedChunk);
                         }
 
                         if (cachedChunk != null)

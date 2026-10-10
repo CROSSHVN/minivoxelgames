@@ -284,4 +284,124 @@ public class VoxelBenchmark
         Debug.Log($"[BENCHMARK] ChunkNeighbors Column Cache:  {chunkCacheMs} ms");
         Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
     }
+
+    [Test]
+    public void Benchmark_WorldL1Cache_Comparison()
+    {
+        var world = new World();
+        // Создаем область 4x4 чанка (16 чанков)
+        for (int cx = -2; cx < 2; cx++)
+        {
+            for (int cz = -2; cz < 2; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                    for (int z = 0; z < 16; z++)
+                        chunk.SetVoxel(x, 30, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        const int iterations = 5_000_000;
+
+        // Прогрев JIT для обоих методов
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = world.GetVoxelLegacyDirect(i % 32 - 16, 30, i % 32 - 16);
+            _ = world.GetVoxel(i % 32 - 16, 30, i % 32 - 16);
+        }
+
+        // 1. Локализованный доступ (типичный паттерн физики, коллизий AABB и проверки блоков вокруг сущностей)
+        int legacySolidCount = 0;
+        var swLegacy = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            int baseX = (i / 100) % 32 - 16;
+            int baseZ = (i / 100) % 32 - 16;
+            int x = baseX + (i % 8);
+            int z = baseZ + ((i / 8) % 8);
+            var v = world.GetVoxelLegacyDirect(x, 30, z);
+            if (v.IsSolid) legacySolidCount++;
+        }
+        swLegacy.Stop();
+        long legacyMs = swLegacy.ElapsedMilliseconds;
+
+        int cachedSolidCount = 0;
+        var swCached = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            int baseX = (i / 100) % 32 - 16;
+            int baseZ = (i / 100) % 32 - 16;
+            int x = baseX + (i % 8);
+            int z = baseZ + ((i / 8) % 8);
+            var v = world.GetVoxel(x, 30, z);
+            if (v.IsSolid) cachedSolidCount++;
+        }
+        swCached.Stop();
+        long cachedMs = swCached.ElapsedMilliseconds;
+
+        Assert.AreEqual(legacySolidCount, cachedSolidCount, "Results must be identical!");
+
+        double speedup = (double)legacyMs / (cachedMs > 0 ? cachedMs : 1);
+        double percent = legacyMs > 0 ? ((legacyMs - cachedMs) / (double)legacyMs) * 100.0 : 0.0;
+
+        Debug.Log($"[BENCHMARK] === LOCALIZED VOXEL ACCESS ({iterations:N0} QUERIES) ===");
+        Debug.Log($"[BENCHMARK] Legacy Dictionary Lookup: {legacyMs} ms");
+        Debug.Log($"[BENCHMARK] Minecraft L1 Chunk Cache: {cachedMs} ms");
+        Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
+
+        Assert.LessOrEqual(cachedMs, legacyMs + 10, "L1 Cache should be faster or equal to dictionary lookup");
+    }
+
+    [Test]
+    public void Benchmark_WorldL1Cache_RaycastTraversal_Comparison()
+    {
+        var world = new World();
+        for (int cx = -2; cx < 2; cx++)
+        {
+            for (int cz = -2; cz < 2; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                    for (int z = 0; z < 16; z++)
+                        chunk.SetVoxel(x, 30, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        const int iterations = 5_000_000;
+
+        // Трассировка лучей (последовательный проход по координатам шагами)
+        int legacyCount = 0;
+        var swLegacy = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            int x = (i % 64) - 32;
+            int z = (i / 64) % 64 - 32;
+            var v = world.GetVoxelLegacyDirect(x, 30, z);
+            if (v.IsSolid) legacyCount++;
+        }
+        swLegacy.Stop();
+        long legacyMs = swLegacy.ElapsedMilliseconds;
+
+        int cachedCount = 0;
+        var swCached = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            int x = (i % 64) - 32;
+            int z = (i / 64) % 64 - 32;
+            var v = world.GetVoxel(x, 30, z);
+            if (v.IsSolid) cachedCount++;
+        }
+        swCached.Stop();
+        long cachedMs = swCached.ElapsedMilliseconds;
+
+        Assert.AreEqual(legacyCount, cachedCount, "Results must be identical!");
+
+        double speedup = (double)legacyMs / (cachedMs > 0 ? cachedMs : 1);
+        double percent = legacyMs > 0 ? ((legacyMs - cachedMs) / (double)legacyMs) * 100.0 : 0.0;
+
+        Debug.Log($"[BENCHMARK] === RAYCAST GRID TRAVERSAL ({iterations:N0} QUERIES) ===");
+        Debug.Log($"[BENCHMARK] Legacy Dictionary Lookup: {legacyMs} ms");
+        Debug.Log($"[BENCHMARK] Minecraft L1 Chunk Cache: {cachedMs} ms");
+        Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
+    }
 }
