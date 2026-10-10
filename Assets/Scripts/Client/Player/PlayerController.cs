@@ -21,8 +21,8 @@ namespace Client.Player
         [SerializeField] private float _eyeHeightSneaking = 1.27f;
 
         [Header("Настройки движения")]
-        [Tooltip("Горизонтальный импульс вперед при прыжке во время спринта (блоков/тик). 0.0f = без толчка (сохранение инерции бега), 0.05f = мягкий толчок.")]
-        [SerializeField] private float _sprintJumpBoost = 0.05f;
+        [Tooltip("Горизонтальный импульс вперед при прыжке во время спринта (в Minecraft 1.8.9 равен 0.2f; с учетом трения земли 0.546 дает честные ~0.109).")]
+        [SerializeField] private float _sprintJumpBoost = 0.2f;
 
         [Header("Отладка")]
         [SerializeField] private bool _showDebugUI = true;
@@ -113,7 +113,7 @@ namespace Client.Player
                 _previousPosition = Entity.Position;
 
                 _currentInput = ReadKeyboardInput(_jumpBuffered);
-                Entity.ApplyInput(_currentInput);
+                Entity.ApplyInput(_currentInput, World);
                 Entity.Tick(World, FixedTimeStep);
                 _tickAccumulator -= FixedTimeStep;
 

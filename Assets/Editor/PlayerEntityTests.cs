@@ -431,4 +431,150 @@ public class PlayerEntityTests
         // За 2 секунды (40 тиков) при цикле прыжка ~11-12 тиков должно совершиться не менее 3 непрерывных прыжков
         Assert.GreaterOrEqual(jumpsCount, 3, "Player must jump continuously when holding Space against a wall without dropping jumps");
     }
+
+    [Test]
+    public void PlayerEntity_SneakingUnderLowCeiling_CannotStandUpUntilClear()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+
+        // Потолок на Y = 2 (поверхность Y = 2.0..3.0) только в зоне X = 0..2
+        for (int x = 0; x <= 2; x++)
+        {
+            for (int z = 0; z <= 2; z++)
+            {
+                world.SetVoxel(x, 2, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        // Игрок на высоте Y = 0.5:
+        // В приседе (1.5) верхняя грань Max.y = 2.0 (помещается под потолок)
+        // Стоя (1.8) верхняя грань Max.y = 2.3 (врезается в потолок)
+        var player = new PlayerEntity(1, new Vector3(1.0f, 0.5f, 1.0f));
+        player.IsSneaking = true;
+        Assert.AreEqual(1.5f, player.Height);
+
+        // Под потолком встать невозможно
+        Assert.IsFalse(player.CanStandUp(world));
+
+        // Игрок отпускает клавишу Shift (sneak = false)
+        var inputReleaseShift = new PlayerInput(
+            movement: Vector2.zero,
+            jump: false,
+            sneak: false,
+            sprint: false,
+            yaw: 0f,
+            pitch: 0f
+        );
+
+        player.ApplyInput(inputReleaseShift, world);
+        Assert.IsTrue(player.IsSneaking, "Player must remain sneaking under low ceiling even when releasing Shift");
+        Assert.AreEqual(1.5f, player.Height);
+
+        player.Tick(world, 0.05f);
+        Assert.IsTrue(player.IsSneaking, "Player must remain sneaking after tick under ceiling");
+
+        // Перемещаем игрока на открытое пространство без потолка (X = 5.0)
+        player.SetPosition(new Vector3(5.0f, 0.5f, 1.0f));
+        Assert.IsTrue(player.CanStandUp(world), "Player should be able to stand up in open space");
+
+        // Следующий тик должен автоматически выпрямить игрока в полный рост (1.8)
+        player.Tick(world, 0.05f);
+        Assert.IsFalse(player.IsSneaking, "Player must automatically stand up after leaving low ceiling");
+        Assert.AreEqual(1.8f, player.Height);
+    }
+
+    [Test]
+    public void PlayerEntity_SprintingIntoWall_CancelsSprint()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        for (int x = 0; x <= 3; x++)
+        {
+            world.SetVoxel(x, 0, 0, new Voxel(BlockType.Stone));
+        }
+        // Стена на X = 2 (Y = 1..2)
+        world.SetVoxel(2, 1, 0, new Voxel(BlockType.Stone));
+        world.SetVoxel(2, 2, 0, new Voxel(BlockType.Stone));
+
+        // Игрок перед стеной на X = 1.65 (Max.x = 1.95), смотрит в стену (+X, Yaw = 90)
+        var player = new PlayerEntity(1, new Vector3(1.65f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        var sprintInput = new PlayerInput(
+            movement: new Vector2(0f, 1f), // вперед
+            jump: false,
+            sneak: false,
+            sprint: true,                  // бег
+            yaw: 90f,
+            pitch: 0f
+        );
+
+        player.ApplyInput(sprintInput, world);
+        Assert.IsTrue(player.IsSprinting);
+
+        // Тикаем несколько раз — игрок добегает и упирается в стену X = 2
+        for (int i = 0; i < 5; i++)
+        {
+            player.Tick(world, 0.05f);
+        }
+
+        Assert.IsTrue(player.IsCollidedHorizontally, "Player must collide horizontally with wall");
+        Assert.IsFalse(player.IsSprinting, "Sprinting must be cancelled when colliding horizontally with a wall");
+    }
+
+    [Test]
+    public void PlayerEntity_PushOutOfBlocks_NudgesPlayerIntoOpenSpace()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+
+        // Стена на X = 0 вдоль оси Z (Z = -1..1), справа (+X) открытое пространство (воздух)
+        for (int z = -1; z <= 1; z++)
+        {
+            world.SetVoxel(0, 1, z, new Voxel(BlockType.Stone));
+        }
+
+        // Размещаем игрока так, чтобы его левые углы основания (X - offset) попали внутрь стены:
+        // Если x = 0.9, Width = 0.6, offset = 0.21 => x - offset = 0.69 (внутри стены X = 0)
+        var player = new PlayerEntity(1, new Vector3(0.9f, 1.0f, 0.5f));
+        player.Velocity = Vector3.zero;
+
+        player.PushOutOfBlocks(world);
+
+        // Ближайшая свободная сторона — Восток (+X), скорость должна стать +0.1f
+        Assert.Greater(player.Velocity.x, 0.0f, "Player must receive positive velocity along X pushing out of the block");
+    }
+
+    [Test]
+    public void LivingEntity_JumpTicks_PreventsRapidJumpSpamming()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+
+        var player = new PlayerEntity(1, new Vector3(0.5f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        // Первый прыжок
+        player.Jump();
+        Assert.AreEqual(0.42f, player.Velocity.y, 0.0001f);
+        Assert.AreEqual(10, player.JumpTicks);
+
+        // Пытаемся вызвать Jump повторно на том же или следующем тике
+        player.Velocity = Vector3.zero;
+        player.Jump();
+        // Прыжок не должен сработать, так как JumpTicks > 0
+        Assert.AreEqual(0.0f, player.Velocity.y, 0.0001f);
+
+        // Пропускаем 10 тиков
+        for (int i = 0; i < 10; i++)
+        {
+            player.Tick(world, 0.05f);
+        }
+
+        Assert.AreEqual(0, player.JumpTicks);
+    }
 }

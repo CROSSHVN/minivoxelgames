@@ -17,13 +17,20 @@ namespace VoxelCore.Entities
         public const float SneakingHeight = 1.5f;
 
         private readonly List<AABB> _sneakGroundBuffer = new List<AABB>(8);
+        private readonly List<AABB> _standTestBuffer = new List<AABB>(8);
         private bool _isSneaking;
+        private bool _wantsToSneak;
 
         public override EntityType Type => EntityType.Player;
 
         /// <summary>
+        /// Желание игрока находиться в приседе (зажата ли клавиша Shift).
+        /// </summary>
+        public bool WantsToSneak => _wantsToSneak;
+
+        /// <summary>
         /// Режим крадущейся походки (Shift).
-        /// При включении уменьшает высоту AABB до 1.5 блоков и активирует защиту от падений с уступов.
+        /// В Minecraft 1.14+ уменьшает высоту AABB до 1.5 блоков и активирует защиту от падений с уступов (Safe Walk).
         /// </summary>
         public bool IsSneaking
         {
@@ -59,28 +66,101 @@ namespace VoxelCore.Entities
         }
 
         /// <summary>
+        /// Проверяет возможность выпрямиться (встать в полный рост 1.8 блока) без столкновения с блоками над головой.
+        /// В Minecraft 1.14+ игрок не может встать из приседа, если пространство над головой заблокировано.
+        /// </summary>
+        public bool CanStandUp(World world)
+        {
+            if (world == null)
+            {
+                return true;
+            }
+
+            float halfWidth = PlayerWidth * 0.5f;
+            AABB standingBox = new AABB(
+                new Vector3(Position.x - halfWidth, Position.y, Position.z - halfWidth),
+                new Vector3(Position.x + halfWidth, Position.y + StandingHeight, Position.z + halfWidth)
+            );
+
+            _standTestBuffer.Clear();
+            world.GetCollidingBoxes(standingBox, _standTestBuffer);
+            return _standTestBuffer.Count == 0;
+        }
+
+        /// <summary>
         /// Применяет пользовательский ввод клиента за текущий тик.
         /// </summary>
-        public void ApplyInput(in PlayerInput input)
+        public void ApplyInput(in PlayerInput input) => ApplyInput(input, null);
+
+        /// <summary>
+        /// Применяет пользовательский ввод клиента с учетом геометрии мира (для 1.14 проверки потолка при вставании).
+        /// </summary>
+        public void ApplyInput(in PlayerInput input, World world)
         {
             Yaw = input.Yaw;
             Pitch = input.Pitch;
-            IsSneaking = input.Sneak;
+            _wantsToSneak = input.Sneak;
+
+            if (input.Sneak)
+            {
+                IsSneaking = true;
+            }
+            else
+            {
+                // В Minecraft 1.14+ игрок не может встать из приседа, если над головой есть блоки
+                if (world == null || CanStandUp(world))
+                {
+                    IsSneaking = false;
+                }
+                else
+                {
+                    IsSneaking = true;
+                }
+            }
+
             // Бег (Sprint) возможен только при движении вперед и блокируется приседанием (Sneak), как в Minecraft Java
-            IsSprinting = input.Sprint && !input.Sneak && input.Movement.y > 0f;
+            IsSprinting = input.Sprint && !IsSneaking && input.Movement.y > 0f;
             MovementInput = input.Movement;
 
             if (input.Jump)
             {
                 Jump();
             }
+            else
+            {
+                ResetJumpTicks();
+            }
+        }
+
+        /// <summary>
+        /// Полный шаг тика симуляции игрока.
+        /// </summary>
+        public override void Tick(World world, float dt)
+        {
+            base.Tick(world, dt);
+
+            // 1.14+: Если игрок отпустил клавишу Shift, но не мог встать из-за потолка,
+            // и теперь вышел в свободное пространство — автоматически выпрямляемся
+            if (!_wantsToSneak && IsSneaking && CanStandUp(world))
+            {
+                IsSneaking = false;
+            }
+
+            // Сброс спринта при столкновении со стеной по горизонтали (как в Minecraft EntityPlayerSP)
+            if (IsSprinting && IsCollidedHorizontally)
+            {
+                IsSprinting = false;
+            }
+
+            // Выталкивание из твердых блоков (как в Minecraft EntityPlayerSP pushOutOfBlocks)
+            PushOutOfBlocks(world);
         }
 
         /// <summary>
         /// Дополнительный горизонтальный импульс вперед при прыжке во время спринта (блоков/тик).
-        /// По умолчанию 0.05f (мягкий толчок вперед). Можно установить в 0.0f для чистого сохранения инерции.
+        /// В Minecraft 1.8.9 равен 0.2f (с учетом трения земли 0.546 в кадре прыжка результирующий импульс равен ~0.109).
         /// </summary>
-        public float SprintJumpBoost { get; set; } = 0.05f;
+        public float SprintJumpBoost { get; set; } = 0.2f;
 
         /// <summary>
         /// Совершает прыжок с учетом спринтерского горизонтального ускорения (SprintJumpBoost).
@@ -88,7 +168,7 @@ namespace VoxelCore.Entities
         /// </summary>
         public override void Jump()
         {
-            if (OnGround)
+            if (OnGround && _jumpTicks == 0)
             {
                 base.Jump();
 
@@ -116,6 +196,78 @@ namespace VoxelCore.Entities
         }
 
         /// <summary>
+        /// Выталкивает игрока из непрозрачных блоков, если углы основания оказались внутри геометрии
+        /// (по аналогии с pushOutOfBlocks в Minecraft EntityPlayerSP).
+        /// </summary>
+        public void PushOutOfBlocks(World world)
+        {
+            if (world == null)
+            {
+                return;
+            }
+
+            float offset = Width * 0.35f;
+            float testY = BoundingBox.Min.y + 0.5f;
+
+            PushOutOfBlockAt(world, Position.x - offset, testY, Position.z + offset);
+            PushOutOfBlockAt(world, Position.x - offset, testY, Position.z - offset);
+            PushOutOfBlockAt(world, Position.x + offset, testY, Position.z - offset);
+            PushOutOfBlockAt(world, Position.x + offset, testY, Position.z + offset);
+        }
+
+        private void PushOutOfBlockAt(World world, float x, float y, float z)
+        {
+            int blockX = Mathf.FloorToInt(x);
+            int blockY = Mathf.FloorToInt(y);
+            int blockZ = Mathf.FloorToInt(z);
+
+            if (world.GetVoxel(blockX, blockY, blockZ).IsSolid)
+            {
+                float dx = x - blockX;
+                float dz = z - blockZ;
+
+                int bestDir = -1;
+                float minDist = 9999f;
+
+                // West (-X)
+                if (!world.GetVoxel(blockX - 1, blockY, blockZ).IsSolid && dx < minDist)
+                {
+                    minDist = dx;
+                    bestDir = 0;
+                }
+
+                // East (+X)
+                if (!world.GetVoxel(blockX + 1, blockY, blockZ).IsSolid && (1f - dx) < minDist)
+                {
+                    minDist = 1f - dx;
+                    bestDir = 1;
+                }
+
+                // North (-Z)
+                if (!world.GetVoxel(blockX, blockY, blockZ - 1).IsSolid && dz < minDist)
+                {
+                    minDist = dz;
+                    bestDir = 4;
+                }
+
+                // South (+Z)
+                if (!world.GetVoxel(blockX, blockY, blockZ + 1).IsSolid && (1f - dz) < minDist)
+                {
+                    minDist = 1f - dz;
+                    bestDir = 5;
+                }
+
+                const float pushSpeed = 0.1f;
+                Vector3 vel = Velocity;
+                if (bestDir == 0) vel.x = -pushSpeed;
+                if (bestDir == 1) vel.x = pushSpeed;
+                if (bestDir == 4) vel.z = -pushSpeed;
+                if (bestDir == 5) vel.z = pushSpeed;
+                Velocity = vel;
+            }
+        }
+
+        /// <summary>
         /// Защита от падения с края блока в режиме крадущейся походки (Minecraft Safe Walk).
         /// </summary>
         protected override Vector3 PreProcessMotion(World world, Vector3 desiredMotion)
@@ -140,7 +292,7 @@ namespace VoxelCore.Entities
             bool HasGround(float offsetX, float offsetZ)
             {
                 _sneakGroundBuffer.Clear();
-                world.GetCollidingBoxes(BoundingBox.Offset(new Vector3(offsetX, -StepHeight, offsetZ)), _sneakGroundBuffer);
+                world.GetCollidingBoxes(BoundingBox.Offset(new Vector3(offsetX, -1.0f, offsetZ)), _sneakGroundBuffer);
                 return _sneakGroundBuffer.Count > 0;
             }
 

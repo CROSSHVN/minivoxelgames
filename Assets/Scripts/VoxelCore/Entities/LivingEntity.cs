@@ -67,14 +67,31 @@ namespace VoxelCore.Entities
             StepHeight = 0.6f;
         }
 
+        protected int _jumpTicks;
+
         /// <summary>
-        /// Совершает прыжок, если сущность стоит на твердой поверхности.
+        /// Счетчик тиков задержки между прыжками (в Minecraft 1.8.9 jumpTicks = 10, т.е. 0.5 сек).
+        /// Предотвращает спам-прыжки при удержании пробела на ступенях и уступах.
+        /// </summary>
+        public int JumpTicks => _jumpTicks;
+
+        /// <summary>
+        /// Сбрасывает задержку прыжка (вызывается при отпускании клавиши прыжка).
+        /// </summary>
+        public void ResetJumpTicks()
+        {
+            _jumpTicks = 0;
+        }
+
+        /// <summary>
+        /// Совершает прыжок, если сущность стоит на твердой поверхности и истекла задержка jumpTicks.
         /// </summary>
         public virtual void Jump()
         {
-            if (OnGround)
+            if (OnGround && _jumpTicks == 0)
             {
                 Velocity = new Vector3(Velocity.x, JumpVelocity, Velocity.z);
+                _jumpTicks = 10;
             }
         }
 
@@ -130,22 +147,36 @@ namespace VoxelCore.Entities
 
         /// <summary>
         /// Полный шаг физической симуляции живой сущности (ускорение, перемещение, затухание).
-        /// Рассчитывается с фиксированным дискретным шагом Minecraft (20 TPS).
+        /// Рассчитывается с фиксированным дискретным шагом Minecraft (20 TPS) по формулам EntityLivingBase 1.8.9.
         /// </summary>
         public override void Tick(World world, float dt)
         {
-            // 1. Ускорение от вектора ввода (на земле полный импульс, в воздухе ослабленный контроль)
-            float speed = GetCurrentSpeed();
-            MoveRelative(MovementInput, OnGround ? speed : speed * 0.2f);
+            if (_jumpTicks > 0)
+            {
+                _jumpTicks--;
+            }
 
-            // 2. Перемещение с осевым разрешением коллизий (выполняется ДО гравитации, как в Minecraft Java)
+            // 1. Определение коэффициента трения поверхности ДО перемещения (Minecraft 1.8.9 f5 / f6)
+            float slipperiness = GetGroundSlipperiness(world);
+            float friction = OnGround ? slipperiness * AirDrag : AirDrag;
+            float frictionCompensation = 0.16277136f / (friction * friction * friction);
+
+            // 2. Ускорение от вектора ввода (на земле с компенсацией трения, в воздухе фиксированный jumpMovementFactor 0.02)
+            float speed = GetCurrentSpeed();
+            float acceleration = OnGround ? speed * frictionCompensation : speed * 0.2f;
+            MoveRelative(MovementInput, acceleration);
+
+            // Фиксация горизонтального трения кадра ДО перемещения (как в Minecraft 1.8.9):
+            // в кадре отрыва от земли (прыжка) к импульсу применяется трение земли (~0.546), а не воздуха (0.91)
+            float dragXZ = OnGround ? slipperiness * AirDrag : AirDrag;
+
+            // 3. Перемещение с осевым разрешением коллизий (выполняется ДО гравитации, как в Minecraft Java)
             Move(world, Velocity);
 
-            // 3. Гравитация (применяется после перемещения, обеспечивая прыжок 1.25 блока)
+            // 4. Гравитация (применяется после перемещения, обеспечивая прыжок 1.25 блока)
             Velocity = new Vector3(Velocity.x, Velocity.y - Gravity, Velocity.z);
 
-            // 4. Трение и сопротивление среды
-            float dragXZ = OnGround ? GetGroundSlipperiness(world) * AirDrag : AirDrag;
+            // 5. Трение и сопротивление среды
             Velocity = new Vector3(Velocity.x * dragXZ, Velocity.y * VerticalDrag, Velocity.z * dragXZ);
         }
 
