@@ -36,6 +36,7 @@ namespace Client.Player
 
         public PlayerEntity Entity { get; private set; }
         public World World { get; private set; }
+        public Camera PlayerCamera => _playerCamera;
 
         private void Awake()
         {

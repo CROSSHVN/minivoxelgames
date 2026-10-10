@@ -430,7 +430,9 @@ public class VoxelBenchmark
         }
 
         GC.Collect();
-        long memBefore = GC.GetTotalMemory(true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long memBefore = GC.GetAllocatedBytesForCurrentThread();
 
         var sw = Stopwatch.StartNew();
 
@@ -446,14 +448,13 @@ public class VoxelBenchmark
         }
 
         sw.Stop();
-        long memAfter = GC.GetTotalMemory(false);
-        long allocatedBytes = memAfter - memBefore;
+        long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - memBefore;
 
         Debug.Log($"[BENCHMARK] === DDA VOXEL RAYCAST ({raycastCount:N0} RAYS) ===");
         Debug.Log($"[BENCHMARK] Total Time: {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / (double)raycastCount * 1000.0:F2} µs / ray)");
         Debug.Log($"[BENCHMARK] Throughput: {raycastCount / (sw.ElapsedMilliseconds / 1000.0):N0} rays/sec (Hits: {hits:N0})");
         Debug.Log($"[BENCHMARK] GC Memory Allocated: {allocatedBytes} bytes (Zero GC target)");
 
-        Assert.LessOrEqual(allocatedBytes, 1024, "DDA Raycast must produce Zero GC allocations!");
+        Assert.AreEqual(0, allocatedBytes, "DDA Raycast must produce strictly Zero GC allocations on thread!");
     }
 }

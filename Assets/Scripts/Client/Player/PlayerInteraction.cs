@@ -53,6 +53,11 @@ namespace Client.Player
                 _worldManager = FindFirstObjectByType<WorldManager>();
             }
 
+            if (_camera == null && _controller != null)
+            {
+                _camera = _controller.PlayerCamera;
+            }
+
             if (_camera == null)
             {
                 _camera = Camera.main;
@@ -67,22 +72,9 @@ namespace Client.Player
             HandleInteractionInput();
         }
 
-        /// <summary>
-        /// Пускает воксельный луч из камеры по направлению взгляда.
-        /// </summary>
-        private void PerformRaycast()
+        private void LateUpdate()
         {
-            if (_controller == null || _controller.World == null || _camera == null)
-            {
-                HideOutline();
-                return;
-            }
-
-            Vector3 origin = _camera.transform.position;
-            Vector3 direction = _camera.transform.forward;
-
-            _lastHit = _controller.World.Raycast(origin, direction, _reachDistance);
-
+            // Обновляем позицию рамки в LateUpdate после интерполяции камеры в PlayerController
             if (_lastHit.HasHit && _enableSelectionOutline)
             {
                 ShowOutline(_lastHit.BlockPos);
@@ -91,6 +83,29 @@ namespace Client.Player
             {
                 HideOutline();
             }
+        }
+
+        /// <summary>
+        /// Пускает воксельный луч из камеры по направлению взгляда.
+        /// </summary>
+        private void PerformRaycast()
+        {
+            if (_camera == null)
+            {
+                _camera = _controller != null && _controller.PlayerCamera != null ? _controller.PlayerCamera : Camera.main;
+            }
+
+            if (_controller == null || _controller.World == null || _camera == null)
+            {
+                _lastHit = default;
+                HideOutline();
+                return;
+            }
+
+            Vector3 origin = _camera.transform.position;
+            Vector3 direction = _camera.transform.forward;
+
+            _lastHit = _controller.World.Raycast(origin, direction, _reachDistance);
         }
 
         /// <summary>
@@ -138,7 +153,8 @@ namespace Client.Player
         private void CreateSelectionOutline()
         {
             _outlineGo = new GameObject("BlockSelectionOutline");
-            _outlineGo.transform.SetParent(transform.root);
+            _outlineGo.transform.SetParent(null); // Независимый объект в мировом пространстве
+            _outlineGo.transform.rotation = Quaternion.identity;
 
             var filter = _outlineGo.AddComponent<MeshFilter>();
             _outlineRenderer = _outlineGo.AddComponent<MeshRenderer>();
@@ -186,6 +202,8 @@ namespace Client.Player
             if (_outlineGo != null)
             {
                 _outlineGo.transform.position = new Vector3(blockPos.x, blockPos.y, blockPos.z);
+                _outlineGo.transform.rotation = Quaternion.identity;
+                _outlineGo.transform.localScale = Vector3.one;
                 _outlineGo.SetActive(true);
             }
         }

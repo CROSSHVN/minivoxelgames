@@ -16,6 +16,7 @@ namespace Client
     {
         [Header("Материалы и ссылки")]
         [SerializeField] private Material _voxelMaterial;
+        [SerializeField] private PlayerController _playerPrefab;
         [SerializeField] private PlayerController _playerController;
 
         [Header("Параметры генерации тестовой зоны")]
@@ -32,6 +33,11 @@ namespace Client
             {
                 _voxelMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/voxel_mat.mat");
             }
+
+            if (_playerPrefab == null)
+            {
+                _playerPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<PlayerController>("Assets/Prefabs/Player.prefab");
+            }
         }
 #endif
 
@@ -41,6 +47,13 @@ namespace Client
             {
 #if UNITY_EDITOR
                 _voxelMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/voxel_mat.mat");
+#endif
+            }
+
+            if (_playerPrefab == null)
+            {
+#if UNITY_EDITOR
+                _playerPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<PlayerController>("Assets/Prefabs/Player.prefab");
 #endif
             }
 
@@ -218,32 +231,27 @@ namespace Client
         }
 
         /// <summary>
-        /// Настройка и размещение игрока в мире.
+        /// Настройка и размещение игрока в мире через Player.prefab.
         /// </summary>
         private void SetupPlayer()
         {
+            // 1. Если игрок уже вручную размещен на сцене (например, для отладки) — используем его
             if (_playerController == null)
             {
                 _playerController = FindFirstObjectByType<PlayerController>();
             }
 
-            if (_playerController == null)
+            // 2. Если в сцене игрока нет — создаем экземпляр из префаба
+            if (_playerController == null && _playerPrefab != null)
             {
-                var playerGo = new GameObject("Player");
-                _playerController = playerGo.AddComponent<PlayerController>();
-
-                // Прикрепляем главную камеру к объекту игрока
-                var mainCam = Camera.main;
-                if (mainCam != null)
-                {
-                    mainCam.transform.SetParent(playerGo.transform);
-                }
+                _playerController = Instantiate(_playerPrefab, _spawnPosition, Quaternion.identity);
+                _playerController.name = "Player";
             }
 
-            // Добавляем систему взаимодействия с миром (DDA Raycast: ломание / установка блоков)
-            if (_playerController.GetComponent<PlayerInteraction>() == null)
+            if (_playerController == null)
             {
-                _playerController.gameObject.AddComponent<PlayerInteraction>();
+                Debug.LogError("[WorldManager] Не удалось создать игрока: _playerPrefab не назначен!");
+                return;
             }
 
             var playerEntity = new PlayerEntity(1, _spawnPosition);
