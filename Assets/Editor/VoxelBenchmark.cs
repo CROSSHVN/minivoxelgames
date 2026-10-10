@@ -110,4 +110,48 @@ public class VoxelBenchmark
 
         Debug.Log($"[BENCHMARK] Memory for 100 chunks (half full): {allocatedMb:F2} MB ({allocatedBytes:N0} bytes)");
     }
+
+    [Test]
+    public void Benchmark_SubChunkMeshing()
+    {
+        var world = new World();
+        // 3x3 чанка для реалистичных границ
+        for (int cx = -1; cx <= 1; cx++)
+        {
+            for (int cz = -1; cz <= 1; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                {
+                    for (int z = 0; z < 16; z++)
+                    {
+                        for (int y = 0; y < 8; y++)
+                        {
+                            chunk.SetVoxel(x, y, z, new Voxel(BlockType.Stone));
+                        }
+                        chunk.SetVoxel(x, 8, z, new Voxel(BlockType.Grass));
+                    }
+                }
+            }
+        }
+
+        var meshData = new Client.Rendering.MeshData();
+
+        // Прогрев JIT
+        for (int i = 0; i < 50; i++)
+        {
+            Client.Rendering.SubChunkMeshBuilder.Build(world, Vector2Int.zero, 0, meshData);
+        }
+
+        const int iterations = 1000;
+        var sw = Stopwatch.StartNew();
+
+        for (int i = 0; i < iterations; i++)
+        {
+            Client.Rendering.SubChunkMeshBuilder.Build(world, Vector2Int.zero, 0, meshData);
+        }
+
+        sw.Stop();
+        Debug.Log($"[BENCHMARK] SubChunkMeshing: {sw.ElapsedMilliseconds} ms for {iterations:N0} builds (Quads: {meshData.Triangles.Count / 6}, Verts: {meshData.Vertices.Count})");
+    }
 }

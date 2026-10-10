@@ -116,7 +116,7 @@ namespace Client.Rendering
                         int worldZ = originZ + z;
 
                         // 1. Up (+Y)
-                        if (world.GetVoxel(worldX, worldY + 1, worldZ).IsAir)
+                        if (y < SubChunk.Size - 1 ? subChunk.GetVoxel(x, y + 1, z).IsAir : world.GetVoxel(worldX, worldY + 1, worldZ).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x, y + 1, z),
@@ -128,7 +128,7 @@ namespace Client.Rendering
                         }
 
                         // 2. Down (-Y)
-                        if (world.GetVoxel(worldX, worldY - 1, worldZ).IsAir)
+                        if (y > 0 ? subChunk.GetVoxel(x, y - 1, z).IsAir : world.GetVoxel(worldX, worldY - 1, worldZ).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x, y, z + 1),
@@ -140,7 +140,7 @@ namespace Client.Rendering
                         }
 
                         // 3. North (+Z)
-                        if (world.GetVoxel(worldX, worldY, worldZ + 1).IsAir)
+                        if (z < SubChunk.Size - 1 ? subChunk.GetVoxel(x, y, z + 1).IsAir : world.GetVoxel(worldX, worldY, worldZ + 1).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x + 1, y, z + 1),
@@ -152,7 +152,7 @@ namespace Client.Rendering
                         }
 
                         // 4. South (-Z)
-                        if (world.GetVoxel(worldX, worldY, worldZ - 1).IsAir)
+                        if (z > 0 ? subChunk.GetVoxel(x, y, z - 1).IsAir : world.GetVoxel(worldX, worldY, worldZ - 1).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x, y, z),
@@ -164,7 +164,7 @@ namespace Client.Rendering
                         }
 
                         // 5. East (+X)
-                        if (world.GetVoxel(worldX + 1, worldY, worldZ).IsAir)
+                        if (x < SubChunk.Size - 1 ? subChunk.GetVoxel(x + 1, y, z).IsAir : world.GetVoxel(worldX + 1, worldY, worldZ).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x + 1, y, z),
@@ -176,7 +176,7 @@ namespace Client.Rendering
                         }
 
                         // 6. West (-X)
-                        if (world.GetVoxel(worldX - 1, worldY, worldZ).IsAir)
+                        if (x > 0 ? subChunk.GetVoxel(x - 1, y, z).IsAir : world.GetVoxel(worldX - 1, worldY, worldZ).IsAir)
                         {
                             meshData.AddFace(
                                 new Vector3(x, y, z + 1),
