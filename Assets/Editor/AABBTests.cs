@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using VoxelCore;
 using VoxelCore.Physics;
 
 public class AABBTests
@@ -136,5 +138,122 @@ public class AABBTests
 
         // Так как по X игрок не перекрывает стену, стена не должна мешать
         Assert.AreEqual(5.0f, allowedDz, 0.0001f);
+    }
+
+    [Test]
+    public void AABB_Epsilon_WalkingAcrossFloorSeams_DoesNotBlockHorizontalMovement()
+    {
+        // Препятствие: соседний блок пола на (1, 0, 0), занимающий Y = 0..1
+        var nextFloorBlock = AABB.FromBlock(1, 0, 0);
+
+        // Игрок стоит на полу Y = 1.0, но из-за float погрешности ноги на 0.99999f
+        var playerWithFloatNoise = new AABB(new Vector3(0.5f, 0.99999f, 0.2f), new Vector3(0.9f, 2.79999f, 0.8f));
+
+        // Игрок шагает вперед по X на 0.5 блока
+        float desiredDx = 0.5f;
+        float allowedDx = nextFloorBlock.CalculateXOffset(playerWithFloatNoise, desiredDx);
+
+        // Благодаря Epsilon блок пола не должен ошибочно посчитаться вертикальным препятствием
+        Assert.AreEqual(0.5f, allowedDx, 0.0001f);
+    }
+
+    [Test]
+    public void AABB_Epsilon_NearWall_ClampsSpuriousOppositePush()
+    {
+        // Стена на X = 3..4
+        var wall = AABB.FromBlock(3, 0, 0);
+
+        // Игрок вплотную к стене с микропроникновением (X max = 3.00002)
+        var playerTouchingWall = new AABB(new Vector3(2.4f, 0.1f, 0.2f), new Vector3(3.00002f, 1.9f, 0.8f));
+
+        // Движение вперед к стене
+        float desiredDx = 0.1f;
+        float allowedDx = wall.CalculateXOffset(playerTouchingWall, desiredDx);
+
+        // Смещение должно обнулиться, а не стать отрицательным (не толкать назад)
+        Assert.AreEqual(0.0f, allowedDx, 0.00001f);
+    }
+
+    [Test]
+    public void World_GetCollidingBoxes_FindsSolidBlocksOnly()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+
+        // Устанавливаем блоки: пол и одна каменная колонна
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+        world.SetVoxel(1, 0, 0, new Voxel(BlockType.Dirt));
+        world.SetVoxel(0, 1, 0, Voxel.Air);
+
+        var boxes = new List<AABB>();
+        var queryBox = new AABB(new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(1.5f, 1.5f, 1.5f));
+
+        world.GetCollidingBoxes(queryBox, boxes);
+
+        // Должны найтись только (0, 0, 0) и (1, 0, 0)
+        Assert.AreEqual(2, boxes.Count);
+        Assert.IsTrue(boxes.Contains(AABB.FromBlock(0, 0, 0)));
+        Assert.IsTrue(boxes.Contains(AABB.FromBlock(1, 0, 0)));
+    }
+
+    [Test]
+    public void World_GetCollidingBoxes_IgnoresAdjacentNonPenetratingBlocks_DueToEpsilon()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+
+        var boxes = new List<AABB>();
+
+        // Область стоит вплотную к блоку (0,0,0) по грани X=1.0, но не проникает внутрь
+        // Min.x = 1.0f (или 0.99999f с погрешностью)
+        var boxTouching = new AABB(new Vector3(0.99999f, 0.0f, 0.0f), new Vector3(2.0f, 1.0f, 1.0f));
+
+        world.GetCollidingBoxes(boxTouching, boxes);
+
+        // Благодаря Epsilon блок (0,0,0) не должен попасть в выборку коллизий
+        Assert.AreEqual(0, boxes.Count);
+    }
+
+    [Test]
+    public void World_GetCollidingBoxes_HandlesChunkBoundariesAndNegativeCoordinates()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(new Vector2Int(-1, 0));
+        world.GetOrCreateChunk(new Vector2Int(0, 0));
+
+        // Блок слева от границы X=0 (в чанке -1)
+        world.SetVoxel(-1, 5, 0, new Voxel(BlockType.Stone));
+        // Блок справа от границы X=0 (в чанке 0)
+        world.SetVoxel(0, 5, 0, new Voxel(BlockType.Dirt));
+
+        var boxes = new List<AABB>();
+        // Область, пересекающая границу между -1 и 0
+        var crossingBox = new AABB(new Vector3(-1.5f, 4.5f, -0.5f), new Vector3(0.5f, 5.5f, 0.5f));
+
+        world.GetCollidingBoxes(crossingBox, boxes);
+
+        Assert.AreEqual(2, boxes.Count);
+        Assert.IsTrue(boxes.Contains(AABB.FromBlock(-1, 5, 0)));
+        Assert.IsTrue(boxes.Contains(AABB.FromBlock(0, 5, 0)));
+    }
+
+    [Test]
+    public void World_GetCollidingBoxes_OutOfBoundsHeight_ReturnsEmpty()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+
+        var boxes = new List<AABB>();
+
+        // Запрос под миром (Y < 0)
+        var boxBelow = new AABB(new Vector3(0, -5, 0), new Vector3(1, -1, 1));
+        world.GetCollidingBoxes(boxBelow, boxes);
+        Assert.AreEqual(0, boxes.Count);
+
+        // Запрос над миром (Y >= 128)
+        var boxAbove = new AABB(new Vector3(0, 130, 0), new Vector3(1, 135, 1));
+        world.GetCollidingBoxes(boxAbove, boxes);
+        Assert.AreEqual(0, boxes.Count);
     }
 }

@@ -9,6 +9,13 @@ namespace VoxelCore.Physics
     /// </summary>
     public readonly struct AABB
     {
+        /// <summary>
+        /// Минимальный порог допуска (Epsilon) для вычислений с плавающей точкой (float).
+        /// Исключает артефакты застревания на стыках смежных вокселей и ложные блокировки.
+        /// 1e-4f = 0.1 миллиметра в масштабе вокселей (1 блок = 1 метр).
+        /// </summary>
+        public const float Epsilon = 1e-4f;
+
         public readonly Vector3 Min;
         public readonly Vector3 Max;
 
@@ -64,13 +71,13 @@ namespace VoxelCore.Physics
         }
 
         /// <summary>
-        /// Проверка пересечения двух AABB.
+        /// Проверка пересечения двух AABB с учетом Epsilon.
         /// </summary>
         public bool Intersects(in AABB other)
         {
-            return Max.x > other.Min.x && Min.x < other.Max.x &&
-                   Max.y > other.Min.y && Min.y < other.Max.y &&
-                   Max.z > other.Min.z && Min.z < other.Max.z;
+            return Max.x > other.Min.x + Epsilon && Min.x < other.Max.x - Epsilon &&
+                   Max.y > other.Min.y + Epsilon && Min.y < other.Max.y - Epsilon &&
+                   Max.z > other.Min.z + Epsilon && Min.z < other.Max.z - Epsilon;
         }
 
         #region Minecraft Axial Collision Resolution
@@ -80,23 +87,33 @@ namespace VoxelCore.Physics
         /// </summary>
         public float CalculateXOffset(in AABB entity, float offsetX)
         {
-            if (entity.Max.y <= Min.y || entity.Min.y >= Max.y ||
-                entity.Max.z <= Min.z || entity.Min.z >= Max.z)
+            if (entity.Max.y <= Min.y + Epsilon || entity.Min.y >= Max.y - Epsilon ||
+                entity.Max.z <= Min.z + Epsilon || entity.Min.z >= Max.z - Epsilon)
             {
                 return offsetX;
             }
 
-            if (offsetX > 0f && entity.Max.x <= Min.x)
+            if (offsetX > 0f && entity.Max.x <= Min.x + Epsilon)
             {
                 float maxAllowed = Min.x - entity.Max.x;
+                if (maxAllowed < 0f && maxAllowed >= -Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed < offsetX)
                 {
                     offsetX = maxAllowed;
                 }
             }
-            else if (offsetX < 0f && entity.Min.x >= Max.x)
+            else if (offsetX < 0f && entity.Min.x >= Max.x - Epsilon)
             {
                 float maxAllowed = Max.x - entity.Min.x;
+                if (maxAllowed > 0f && maxAllowed <= Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed > offsetX)
                 {
                     offsetX = maxAllowed;
@@ -111,23 +128,33 @@ namespace VoxelCore.Physics
         /// </summary>
         public float CalculateYOffset(in AABB entity, float offsetY)
         {
-            if (entity.Max.x <= Min.x || entity.Min.x >= Max.x ||
-                entity.Max.z <= Min.z || entity.Min.z >= Max.z)
+            if (entity.Max.x <= Min.x + Epsilon || entity.Min.x >= Max.x - Epsilon ||
+                entity.Max.z <= Min.z + Epsilon || entity.Min.z >= Max.z - Epsilon)
             {
                 return offsetY;
             }
 
-            if (offsetY > 0f && entity.Max.y <= Min.y)
+            if (offsetY > 0f && entity.Max.y <= Min.y + Epsilon)
             {
                 float maxAllowed = Min.y - entity.Max.y;
+                if (maxAllowed < 0f && maxAllowed >= -Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed < offsetY)
                 {
                     offsetY = maxAllowed;
                 }
             }
-            else if (offsetY < 0f && entity.Min.y >= Max.y)
+            else if (offsetY < 0f && entity.Min.y >= Max.y - Epsilon)
             {
                 float maxAllowed = Max.y - entity.Min.y;
+                if (maxAllowed > 0f && maxAllowed <= Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed > offsetY)
                 {
                     offsetY = maxAllowed;
@@ -142,23 +169,33 @@ namespace VoxelCore.Physics
         /// </summary>
         public float CalculateZOffset(in AABB entity, float offsetZ)
         {
-            if (entity.Max.x <= Min.x || entity.Min.x >= Max.x ||
-                entity.Max.y <= Min.y || entity.Min.y >= Max.y)
+            if (entity.Max.x <= Min.x + Epsilon || entity.Min.x >= Max.x - Epsilon ||
+                entity.Max.y <= Min.y + Epsilon || entity.Min.y >= Max.y - Epsilon)
             {
                 return offsetZ;
             }
 
-            if (offsetZ > 0f && entity.Max.z <= Min.z)
+            if (offsetZ > 0f && entity.Max.z <= Min.z + Epsilon)
             {
                 float maxAllowed = Min.z - entity.Max.z;
+                if (maxAllowed < 0f && maxAllowed >= -Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed < offsetZ)
                 {
                     offsetZ = maxAllowed;
                 }
             }
-            else if (offsetZ < 0f && entity.Min.z >= Max.z)
+            else if (offsetZ < 0f && entity.Min.z >= Max.z - Epsilon)
             {
                 float maxAllowed = Max.z - entity.Min.z;
+                if (maxAllowed > 0f && maxAllowed <= Epsilon)
+                {
+                    maxAllowed = 0f;
+                }
+
                 if (maxAllowed > offsetZ)
                 {
                     offsetZ = maxAllowed;

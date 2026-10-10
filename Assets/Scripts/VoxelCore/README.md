@@ -39,9 +39,17 @@
   * `SetVoxel(...)` возвращает `bool`. Изменяет воксель **только если чанк уже создан** и $Y \in [0..127]$. Самостоятельно чанки не генерирует.
   * Получение и создание чанков: `GetOrCreateChunk(Vector2Int coord)`.
   * `GetVoxel(...)` безопасно возвращает `Voxel.Air`, если чанк не загружен или $Y$ за пределами допустимого диапазона.
+* **Физические выборки коллизий (Zero GC):**
+  * `GetCollidingBoxes(in AABB box, List<AABB> results)` — эффективная выборка твердых блоков в заданной области с кэшированием активного чанка и фильтрацией по `AABB.Epsilon`.
 * **Побитовая математика координат (Zero Float Overhead):**
   * `WorldToChunkCoord(worldX, worldZ)` — сдвиг `coord >> 4`, мгновенно работает для любых (включая отрицательные) чисел без вызовов `Mathf.FloorToInt`.
   * `WorldToLocalCoord(worldCoord)` — маска `coord & 15`, возвращает локальную позицию $[0..15]$.
+
+### `Physics/AABB.cs`
+* Базовый осевыровненный параллелепипед воксельной физики.
+* **`AABB.Epsilon = 1e-4f` (0.1 мм):** устраняет артефакты застревания на стыках соседних блоков и ложные блокировки при вычислениях с плавающей точкой `float`.
+* Методы: `FromBlock`, `FromCenterAndSize`, `Expand`, `Offset`, `Intersects`.
+* **Minecraft Axial Resolution:** `CalculateXOffset`, `CalculateYOffset`, `CalculateZOffset` с защитой от микропроникновений и обратных толчков.
 
 ### `SubChunkNeighbors.cs` & `ChunkNeighbors.cs`
 * **Neighborhood Cache (Кэш соседства):**
