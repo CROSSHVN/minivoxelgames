@@ -404,4 +404,56 @@ public class VoxelBenchmark
         Debug.Log($"[BENCHMARK] Minecraft L1 Chunk Cache: {cachedMs} ms");
         Debug.Log($"[BENCHMARK] Result: {speedup:F2}x faster ({percent:F1}% time saved!)");
     }
+
+    [Test]
+    public void Benchmark_VoxelRaycast_DDA()
+    {
+        var world = new World();
+        // Создаем 3x3 чанка с ландшафтом
+        for (int cx = -1; cx <= 1; cx++)
+        {
+            for (int cz = -1; cz <= 1; cz++)
+            {
+                var chunk = world.GetOrCreateChunk(new Vector2Int(cx, cz));
+                for (int x = 0; x < 16; x++)
+                    for (int z = 0; z < 16; z++)
+                        chunk.SetVoxel(x, 10, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        const int raycastCount = 1_000_000;
+
+        // Прогрев JIT
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = world.Raycast(new Vector3(5f, 13f, 5f), new Vector3(0.1f, -1f, 0.1f), 5f);
+        }
+
+        GC.Collect();
+        long memBefore = GC.GetTotalMemory(true);
+
+        var sw = Stopwatch.StartNew();
+
+        int hits = 0;
+        for (int i = 0; i < raycastCount; i++)
+        {
+            float angle = (i % 360) * Mathf.Deg2Rad;
+            Vector3 origin = new Vector3((i % 30) - 15, 12f, ((i * 3) % 30) - 15);
+            Vector3 dir = new Vector3(Mathf.Sin(angle), -0.5f, Mathf.Cos(angle));
+
+            var hit = world.Raycast(origin, dir, 5f);
+            if (hit.HasHit) hits++;
+        }
+
+        sw.Stop();
+        long memAfter = GC.GetTotalMemory(false);
+        long allocatedBytes = memAfter - memBefore;
+
+        Debug.Log($"[BENCHMARK] === DDA VOXEL RAYCAST ({raycastCount:N0} RAYS) ===");
+        Debug.Log($"[BENCHMARK] Total Time: {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / (double)raycastCount * 1000.0:F2} µs / ray)");
+        Debug.Log($"[BENCHMARK] Throughput: {raycastCount / (sw.ElapsedMilliseconds / 1000.0):N0} rays/sec (Hits: {hits:N0})");
+        Debug.Log($"[BENCHMARK] GC Memory Allocated: {allocatedBytes} bytes (Zero GC target)");
+
+        Assert.LessOrEqual(allocatedBytes, 1024, "DDA Raycast must produce Zero GC allocations!");
+    }
 }

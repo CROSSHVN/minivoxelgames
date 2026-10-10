@@ -156,6 +156,68 @@ namespace Client
         }
 
         /// <summary>
+        /// Изменяет воксель в мире и мгновенно перестраивает меши затронутого подчанка
+        /// (а также смежных подчанков при изменении вокселя на границе).
+        /// </summary>
+        public bool ModifyVoxel(int worldX, int worldY, int worldZ, Voxel newVoxel)
+        {
+            if (World == null || worldY < 0 || worldY >= Chunk.Height)
+            {
+                return false;
+            }
+
+            if (!World.SetVoxel(worldX, worldY, worldZ, newVoxel))
+            {
+                return false;
+            }
+
+            int chunkX = worldX >> SubChunk.Shift;
+            int chunkZ = worldZ >> SubChunk.Shift;
+            int subIndex = worldY >> SubChunk.Shift;
+
+            Vector2Int chunkCoord = new Vector2Int(chunkX, chunkZ);
+            if (_chunkViews.TryGetValue(chunkCoord, out ChunkView chunkView))
+            {
+                chunkView.RebuildSubChunk(subIndex, World);
+
+                int localX = worldX & SubChunk.Mask;
+                int localY = worldY & SubChunk.Mask;
+                int localZ = worldZ & SubChunk.Mask;
+
+                // Если блок на вертикальной границе подчанка — обновляем смежный подчанк сверху/снизу
+                if (localY == 0 && subIndex > 0)
+                {
+                    chunkView.RebuildSubChunk(subIndex - 1, World);
+                }
+                else if (localY == SubChunk.Size - 1 && subIndex < Chunk.SubChunksCount - 1)
+                {
+                    chunkView.RebuildSubChunk(subIndex + 1, World);
+                }
+
+                // Если блок на горизонтальной границе чанка — обновляем соседний чанк
+                if (localX == 0 && _chunkViews.TryGetValue(new Vector2Int(chunkX - 1, chunkZ), out var westChunk))
+                {
+                    westChunk.RebuildSubChunk(subIndex, World);
+                }
+                else if (localX == SubChunk.Size - 1 && _chunkViews.TryGetValue(new Vector2Int(chunkX + 1, chunkZ), out var eastChunk))
+                {
+                    eastChunk.RebuildSubChunk(subIndex, World);
+                }
+
+                if (localZ == 0 && _chunkViews.TryGetValue(new Vector2Int(chunkX, chunkZ - 1), out var southChunk))
+                {
+                    southChunk.RebuildSubChunk(subIndex, World);
+                }
+                else if (localZ == SubChunk.Size - 1 && _chunkViews.TryGetValue(new Vector2Int(chunkX, chunkZ + 1), out var northChunk))
+                {
+                    northChunk.RebuildSubChunk(subIndex, World);
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Настройка и размещение игрока в мире.
         /// </summary>
         private void SetupPlayer()
@@ -176,6 +238,12 @@ namespace Client
                 {
                     mainCam.transform.SetParent(playerGo.transform);
                 }
+            }
+
+            // Добавляем систему взаимодействия с миром (DDA Raycast: ломание / установка блоков)
+            if (_playerController.GetComponent<PlayerInteraction>() == null)
+            {
+                _playerController.gameObject.AddComponent<PlayerInteraction>();
             }
 
             var playerEntity = new PlayerEntity(1, _spawnPosition);

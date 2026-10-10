@@ -187,6 +187,16 @@ namespace VoxelCore
         #region Physics Collision Queries
 
         /// <summary>
+        /// Трассирует воксельный луч по алгоритму DDA (Amanatides-Woo / Minecraft 1.8.9).
+        /// Находит первый твердый блок, сторону удара (BlockFace) и позицию для установки смежного блока.
+        /// Не производит аллокаций памяти в куче (Zero GC).
+        /// </summary>
+        public VoxelHitResult Raycast(Vector3 origin, Vector3 direction, float maxDistance = 4.5f)
+        {
+            return VoxelRaycast.Raycast(this, origin, direction, maxDistance);
+        }
+
+        /// <summary>
         /// Находит все твердые воксели (AABB блоков), пересекающие заданную область.
         /// Очищает переданный список <paramref name="results"/> и заполняет его найденными AABB блоков.
         /// Не производит аллокаций памяти в куче (Zero GC).
