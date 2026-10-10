@@ -21,33 +21,47 @@ namespace VoxelCore
         {
             Position = position;
             _subChunks = new SubChunk[SubChunksCount];
-
-            for (int i = 0; i < SubChunksCount; i++)
-            {
-                _subChunks[i] = new SubChunk();
-            }
         }
 
         /// <summary>
         /// Возвращает воксель по локальным координатам чанка (X: 0..15, Y: 0..127, Z: 0..15).
+        /// Если подчанк еще не создан (пустой воздух), сразу возвращает Voxel.Air.
         /// </summary>
         public Voxel GetVoxel(int localX, int localY, int localZ)
         {
-            int subChunkIndex = localY / SubChunk.Size;
-            int subLocalY = localY % SubChunk.Size;
+            int subChunkIndex = localY >> SubChunk.Shift;
+            SubChunk subChunk = _subChunks[subChunkIndex];
+            if (subChunk == null)
+            {
+                return Voxel.Air;
+            }
 
-            return _subChunks[subChunkIndex].GetVoxel(localX, subLocalY, localZ);
+            int subLocalY = localY & SubChunk.Mask;
+            return subChunk.GetVoxel(localX, subLocalY, localZ);
         }
 
         /// <summary>
         /// Устанавливает воксель по локальным координатам чанка (X: 0..15, Y: 0..127, Z: 0..15).
+        /// Выделяет память под подчанк только при записи твердого блока.
         /// </summary>
         public void SetVoxel(int localX, int localY, int localZ, Voxel voxel)
         {
-            int subChunkIndex = localY / SubChunk.Size;
-            int subLocalY = localY % SubChunk.Size;
+            int subChunkIndex = localY >> SubChunk.Shift;
+            SubChunk subChunk = _subChunks[subChunkIndex];
 
-            _subChunks[subChunkIndex].SetVoxel(localX, subLocalY, localZ, voxel);
+            if (subChunk == null)
+            {
+                if (voxel.IsAir)
+                {
+                    return;
+                }
+
+                subChunk = new SubChunk();
+                _subChunks[subChunkIndex] = subChunk;
+            }
+
+            int subLocalY = localY & SubChunk.Mask;
+            subChunk.SetVoxel(localX, subLocalY, localZ, voxel);
         }
 
         /// <summary>

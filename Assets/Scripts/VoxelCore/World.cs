@@ -119,8 +119,8 @@ namespace VoxelCore
         public static Vector2Int WorldToChunkCoord(int worldX, int worldZ)
         {
             return new Vector2Int(
-                Mathf.FloorToInt((float)worldX / Chunk.Width),
-                Mathf.FloorToInt((float)worldZ / Chunk.Width)
+                worldX >> SubChunk.Shift,
+                worldZ >> SubChunk.Shift
             );
         }
 
@@ -138,8 +138,7 @@ namespace VoxelCore
         /// </summary>
         public static int WorldToLocalCoord(int worldCoord)
         {
-            int local = worldCoord % Chunk.Width;
-            return local < 0 ? local + Chunk.Width : local;
+            return worldCoord & SubChunk.Mask;
         }
 
         /// <summary>

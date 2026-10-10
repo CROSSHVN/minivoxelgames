@@ -7,6 +7,8 @@ namespace VoxelCore
     public sealed class SubChunk
     {
         public const int Size = 16;
+        public const int Shift = 4;
+        public const int Mask = 15;
         public const int Volume = Size * Size * Size; // 4096 вокселей
 
         private readonly Voxel[] _voxels;
@@ -34,11 +36,11 @@ namespace VoxelCore
 
         /// <summary>
         /// Вычисление одномерного индекса в массиве по координатам (x, y, z).
-        /// Порядок: X (горизонталь), Z (глубина), Y (вертикальный слой).
+        /// Порядок: X (горизонталь), Z (глубина: << 4), Y (вертикальный слой: << 8).
         /// </summary>
         private static int GetIndex(int x, int y, int z)
         {
-            return x + (z * Size) + (y * Size * Size);
+            return x + (z << Shift) + (y << (Shift + Shift));
         }
     }
 }
