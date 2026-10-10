@@ -121,6 +121,7 @@ namespace VoxelCore.Entities
                 throw new ArgumentNullException(nameof(world));
             }
 
+            Vector3 originalDesired = desiredMotion;
             desiredMotion = PreProcessMotion(world, desiredMotion);
 
             AABB origBox = _boundingBox;
@@ -128,7 +129,7 @@ namespace VoxelCore.Entities
 
             // Broadphase: расширяем AABB вектором смещения и высотой шага для сбора всех блоков-препятствий
             AABB sweptBox = _boundingBox.Expand(desiredMotion);
-            if ((OnGround || desiredMotion.y <= 0f) && StepHeight > 0f)
+            if (desiredMotion.y <= 0f && (wasOnGround || OnGround) && StepHeight > 0f)
             {
                 sweptBox = sweptBox.Expand(new Vector3(0f, StepHeight, 0f));
             }
@@ -162,7 +163,11 @@ namespace VoxelCore.Entities
             bool collidedHorizontally = collidedX || collidedZ;
 
             // 2. Симуляция авто-шага (Step-Height) при наличии горизонтального препятствия
-            bool canStep = (OnGround || (desiredMotion.y < 0f && Mathf.Abs(allowedDy - desiredMotion.y) > AABB.Epsilon)) &&
+            // Авто-шаг выполняется только при движении по горизонтали на земле (или падении),
+            // и никогда не запускается во время активного прыжка вверх (desiredMotion.y > 0),
+            // чтобы не гасить вертикальную скорость прыжка.
+            bool canStep = desiredMotion.y <= 0f &&
+                           (wasOnGround || Mathf.Abs(allowedDy - desiredMotion.y) > AABB.Epsilon) &&
                            collidedHorizontally &&
                            StepHeight > 0f;
 
@@ -243,24 +248,24 @@ namespace VoxelCore.Entities
             bool landedOnStep = didStep && (stepDownY > -stepUpY + AABB.Epsilon);
 
             bool stillOnGround = false;
-            if (wasOnGround && Mathf.Abs(allowedDy) <= AABB.Epsilon && desiredMotion.y <= 0f)
+            if (!hitGroundNormally && !landedOnStep && wasOnGround && Mathf.Abs(desiredMotion.y) <= AABB.Epsilon)
             {
-                AABB groundTest = _boundingBox.Offset(new Vector3(0f, -AABB.Epsilon * 2f, 0f));
+                AABB groundTest = _boundingBox.Offset(new Vector3(0f, -0.05f, 0f));
                 _collisionBuffer.Clear();
                 world.GetCollidingBoxes(groundTest, _collisionBuffer);
                 stillOnGround = _collisionBuffer.Count > 0;
             }
 
             OnGround = hitGroundNormally || landedOnStep || stillOnGround;
-            IsCollidedHorizontally = Mathf.Abs(desiredMotion.x - allowedDx) > AABB.Epsilon ||
-                                     Mathf.Abs(desiredMotion.z - allowedDz) > AABB.Epsilon;
-            IsCollidedVertically = Mathf.Abs(desiredMotion.y - allowedDy) > AABB.Epsilon;
+            IsCollidedHorizontally = Mathf.Abs(originalDesired.x - allowedDx) > AABB.Epsilon ||
+                                     Mathf.Abs(originalDesired.z - allowedDz) > AABB.Epsilon;
+            IsCollidedVertically = Mathf.Abs(originalDesired.y - allowedDy) > AABB.Epsilon;
 
             // 5. Обнуление скорости по осям, заблокированным коллизиями
             Vector3 newVel = Velocity;
-            if (Mathf.Abs(desiredMotion.x - allowedDx) > AABB.Epsilon) newVel.x = 0f;
-            if (Mathf.Abs(desiredMotion.z - allowedDz) > AABB.Epsilon) newVel.z = 0f;
-            if (Mathf.Abs(desiredMotion.y - allowedDy) > AABB.Epsilon) newVel.y = 0f;
+            if (Mathf.Abs(originalDesired.x - allowedDx) > AABB.Epsilon) newVel.x = 0f;
+            if (Mathf.Abs(originalDesired.z - allowedDz) > AABB.Epsilon) newVel.z = 0f;
+            if (Mathf.Abs(originalDesired.y - allowedDy) > AABB.Epsilon) newVel.y = 0f;
             Velocity = newVel;
         }
 

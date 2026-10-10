@@ -66,7 +66,8 @@ namespace VoxelCore.Entities
             Yaw = input.Yaw;
             Pitch = input.Pitch;
             IsSneaking = input.Sneak;
-            IsSprinting = input.Sprint;
+            // Бег (Sprint) возможен только при движении вперед и блокируется приседанием (Sneak), как в Minecraft Java
+            IsSprinting = input.Sprint && !input.Sneak && input.Movement.y > 0f;
             MovementInput = input.Movement;
 
             if (input.Jump)
@@ -75,16 +76,41 @@ namespace VoxelCore.Entities
             }
         }
 
+        /// <summary>
+        /// Дополнительный горизонтальный импульс вперед при прыжке во время спринта (блоков/тик).
+        /// По умолчанию 0.05f (мягкий толчок вперед). Можно установить в 0.0f для чистого сохранения инерции.
+        /// </summary>
+        public float SprintJumpBoost { get; set; } = 0.05f;
+
+        /// <summary>
+        /// Совершает прыжок с учетом спринтерского горизонтального ускорения (SprintJumpBoost).
+        /// Импульс вперед добавляется только при реальном беге вперед, прыжок на месте не дает смещения.
+        /// </summary>
+        public override void Jump()
+        {
+            if (OnGround)
+            {
+                base.Jump();
+
+                if (IsSprinting && MovementInput.y > 0f && SprintJumpBoost > 0f)
+                {
+                    float rad = Yaw * Mathf.Deg2Rad;
+                    Velocity += new Vector3(Mathf.Sin(rad) * SprintJumpBoost, 0f, Mathf.Cos(rad) * SprintJumpBoost);
+                }
+            }
+        }
+
         protected override float GetCurrentSpeed()
         {
             float speed = BaseMovementSpeed;
-            if (IsSprinting)
-            {
-                speed *= SprintMultiplier;
-            }
-            else if (IsSneaking)
+            // Приседание имеет абсолютный приоритет над бегом
+            if (IsSneaking)
             {
                 speed *= SneakMultiplier;
+            }
+            else if (IsSprinting)
+            {
+                speed *= SprintMultiplier;
             }
             return speed;
         }
@@ -108,84 +134,33 @@ namespace VoxelCore.Entities
             float dz = motion.z;
             const float step = 0.05f;
 
-            // 1. Проверка движения по оси X: если под ногами в новой точке пропасть, уменьшаем смещение
-            while (Mathf.Abs(dx) > AABB.Epsilon)
-            {
-                AABB testBox = BoundingBox.Offset(new Vector3(dx, -StepHeight, 0f));
-                _sneakGroundBuffer.Clear();
-                world.GetCollidingBoxes(testBox, _sneakGroundBuffer);
-                if (_sneakGroundBuffer.Count > 0)
-                {
-                    break;
-                }
+            static float StepDown(float val, float s) =>
+                val > 0f ? Mathf.Max(0f, val - s) : Mathf.Min(0f, val + s);
 
-                if (dx > 0f)
-                {
-                    dx -= step;
-                    if (dx < 0f) dx = 0f;
-                }
-                else
-                {
-                    dx += step;
-                    if (dx > 0f) dx = 0f;
-                }
+            bool HasGround(float offsetX, float offsetZ)
+            {
+                _sneakGroundBuffer.Clear();
+                world.GetCollidingBoxes(BoundingBox.Offset(new Vector3(offsetX, -StepHeight, offsetZ)), _sneakGroundBuffer);
+                return _sneakGroundBuffer.Count > 0;
+            }
+
+            // 1. Проверка движения по оси X
+            while (Mathf.Abs(dx) > AABB.Epsilon && !HasGround(dx, 0f))
+            {
+                dx = StepDown(dx, step);
             }
 
             // 2. Проверка движения по оси Z
-            while (Mathf.Abs(dz) > AABB.Epsilon)
+            while (Mathf.Abs(dz) > AABB.Epsilon && !HasGround(0f, dz))
             {
-                AABB testBox = BoundingBox.Offset(new Vector3(0f, -StepHeight, dz));
-                _sneakGroundBuffer.Clear();
-                world.GetCollidingBoxes(testBox, _sneakGroundBuffer);
-                if (_sneakGroundBuffer.Count > 0)
-                {
-                    break;
-                }
-
-                if (dz > 0f)
-                {
-                    dz -= step;
-                    if (dz < 0f) dz = 0f;
-                }
-                else
-                {
-                    dz += step;
-                    if (dz > 0f) dz = 0f;
-                }
+                dz = StepDown(dz, step);
             }
 
             // 3. Проверка одновременного диагонального смещения
-            while (Mathf.Abs(dx) > AABB.Epsilon && Mathf.Abs(dz) > AABB.Epsilon)
+            while (Mathf.Abs(dx) > AABB.Epsilon && Mathf.Abs(dz) > AABB.Epsilon && !HasGround(dx, dz))
             {
-                AABB testBox = BoundingBox.Offset(new Vector3(dx, -StepHeight, dz));
-                _sneakGroundBuffer.Clear();
-                world.GetCollidingBoxes(testBox, _sneakGroundBuffer);
-                if (_sneakGroundBuffer.Count > 0)
-                {
-                    break;
-                }
-
-                if (dx > 0f)
-                {
-                    dx -= step;
-                    if (dx < 0f) dx = 0f;
-                }
-                else
-                {
-                    dx += step;
-                    if (dx > 0f) dx = 0f;
-                }
-
-                if (dz > 0f)
-                {
-                    dz -= step;
-                    if (dz < 0f) dz = 0f;
-                }
-                else
-                {
-                    dz += step;
-                    if (dz > 0f) dz = 0f;
-                }
+                dx = StepDown(dx, step);
+                dz = StepDown(dz, step);
             }
 
             return new Vector3(dx, motion.y, dz);

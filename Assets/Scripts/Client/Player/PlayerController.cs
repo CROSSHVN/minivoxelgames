@@ -20,6 +20,10 @@ namespace Client.Player
         [SerializeField] private float _eyeHeightStanding = 1.62f;
         [SerializeField] private float _eyeHeightSneaking = 1.27f;
 
+        [Header("Настройки движения")]
+        [Tooltip("Горизонтальный импульс вперед при прыжке во время спринта (блоков/тик). 0.0f = без толчка (сохранение инерции бега), 0.05f = мягкий толчок.")]
+        [SerializeField] private float _sprintJumpBoost = 0.05f;
+
         [Header("Отладка")]
         [SerializeField] private bool _showDebugUI = true;
 
@@ -28,6 +32,7 @@ namespace Client.Player
         private Vector3 _previousPosition;
         private float _currentEyeHeight;
         private PlayerInput _currentInput;
+        private bool _jumpBuffered;
 
         public PlayerEntity Entity { get; private set; }
         public World World { get; private set; }
@@ -63,6 +68,7 @@ namespace Client.Player
             World = world ?? throw new ArgumentNullException(nameof(world));
             Entity = entity ?? throw new ArgumentNullException(nameof(entity));
 
+            Entity.SprintJumpBoost = _sprintJumpBoost;
             _previousPosition = Entity.Position;
             transform.position = Entity.Position;
             transform.rotation = Quaternion.Euler(0f, Entity.Yaw, 0f);
@@ -74,6 +80,16 @@ namespace Client.Player
             }
         }
 
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (Entity != null)
+            {
+                Entity.SprintJumpBoost = _sprintJumpBoost;
+            }
+        }
+#endif
+
         private void Update()
         {
             if (Entity == null || World == null)
@@ -83,16 +99,25 @@ namespace Client.Player
 
             HandleCursorToggle();
             HandleMouseLook();
-            _currentInput = ReadKeyboardInput();
 
-            // Дискретная физическая симуляция (20 тиков в секунду, 50 мс)
-            _tickAccumulator += Time.deltaTime;
+            var keyboard = Keyboard.current;
+            if (keyboard != null && (keyboard.spaceKey.wasPressedThisFrame || keyboard.spaceKey.isPressed))
+            {
+                _jumpBuffered = true;
+            }
+
+            // Дискретная физическая симуляция (20 тиков в секунду, 50 мс) с защитой от накопления лагов (макс. 4 тика за кадр)
+            _tickAccumulator = Mathf.Min(_tickAccumulator + Time.deltaTime, 0.2f);
             while (_tickAccumulator >= FixedTimeStep)
             {
                 _previousPosition = Entity.Position;
+
+                _currentInput = ReadKeyboardInput(_jumpBuffered);
                 Entity.ApplyInput(_currentInput);
                 Entity.Tick(World, FixedTimeStep);
                 _tickAccumulator -= FixedTimeStep;
+
+                _jumpBuffered = keyboard != null && keyboard.spaceKey.isPressed;
             }
 
             // Плавный рендеринг камеры с субтиковой интерполяцией (для 60/120+ FPS)
@@ -147,12 +172,12 @@ namespace Client.Player
             Entity.Pitch = newPitch;
         }
 
-        private PlayerInput ReadKeyboardInput()
+        private PlayerInput ReadKeyboardInput(bool jumpOverride = false)
         {
             var keyboard = Keyboard.current;
             if (keyboard == null)
             {
-                return new PlayerInput(Vector2.zero, false, false, false, Entity.Yaw, Entity.Pitch);
+                return new PlayerInput(Vector2.zero, jumpOverride, false, false, Entity.Yaw, Entity.Pitch);
             }
 
             float forward = 0f;
@@ -163,7 +188,7 @@ namespace Client.Player
             if (keyboard.dKey.isPressed) strafe += 1f;
             if (keyboard.aKey.isPressed) strafe -= 1f;
 
-            bool jump = keyboard.spaceKey.isPressed;
+            bool jump = jumpOverride || keyboard.spaceKey.isPressed;
             bool sneak = keyboard.leftShiftKey.isPressed;
             bool sprint = keyboard.leftCtrlKey.isPressed;
 

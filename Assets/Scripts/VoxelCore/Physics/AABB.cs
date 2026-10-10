@@ -128,8 +128,8 @@ namespace VoxelCore.Physics
         /// </summary>
         public float CalculateYOffset(in AABB entity, float offsetY)
         {
-            if (entity.Max.x <= Min.x + Epsilon || entity.Min.x >= Max.x - Epsilon ||
-                entity.Max.z <= Min.z + Epsilon || entity.Min.z >= Max.z - Epsilon)
+            if (entity.Max.x <= Min.x || entity.Min.x >= Max.x ||
+                entity.Max.z <= Min.z || entity.Min.z >= Max.z)
             {
                 return offsetY;
             }

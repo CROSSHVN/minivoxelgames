@@ -115,6 +115,51 @@ public class PlayerEntityTests
     }
 
     [Test]
+    public void PlayerEntity_ReleasingSneakAtEdge_DoesNotFall()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+
+        var player = new PlayerEntity(1, new Vector3(0.5f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        // Игрок идет вперед по оси +Z (Yaw = 0) с зажатым Sneak
+        for (int i = 0; i < 30; i++)
+        {
+            var input = new PlayerInput(new Vector2(0f, 1f), false, true, false, 0f, 0f);
+            player.ApplyInput(input);
+            player.Tick(world, 0.05f);
+        }
+
+        Assert.AreEqual(1.0f, player.Position.y, 0.01f);
+        Assert.IsTrue(player.OnGround);
+
+        // Игрок остановился (отпустил W), но еще держит Shift
+        for (int i = 0; i < 10; i++)
+        {
+            var input = new PlayerInput(Vector2.zero, false, true, false, 0f, 0f);
+            player.ApplyInput(input);
+            player.Tick(world, 0.05f);
+        }
+
+        Assert.AreEqual(1.0f, player.Position.y, 0.01f);
+        Assert.IsTrue(player.OnGround);
+
+        // Игрок ОТПУСКАЕТ присед
+        for (int i = 0; i < 20; i++)
+        {
+            var input = new PlayerInput(Vector2.zero, false, false, false, 0f, 0f);
+            player.ApplyInput(input);
+            player.Tick(world, 0.05f);
+        }
+
+        Assert.AreEqual(1.0f, player.Position.y, 0.01f, "Player must stay on block after releasing sneak");
+        Assert.IsTrue(player.OnGround, "Player must remain on ground after releasing sneak");
+    }
+
+    [Test]
     public void PlayerEntity_WalkingWithoutSneak_FallsOffCliffEdge()
     {
         var world = new World();
@@ -163,5 +208,227 @@ public class PlayerEntityTests
         Assert.IsFalse(player.IsSprinting);
         // Прыжок сработал
         Assert.AreEqual(0.42f, player.Velocity.y, 0.0001f);
+    }
+
+    [Test]
+    public void PlayerEntity_SneakOverridesSprint_SpeedAndFlags()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+
+        var player = new PlayerEntity(1, new Vector3(0.5f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f)); // Приземление на землю Y = 1.0
+        Assert.IsTrue(player.OnGround);
+
+        // Когда зажаты одновременно и Sneak, и Sprint:
+        var input = new PlayerInput(
+            movement: new Vector2(0f, 1f),
+            jump: false,
+            sneak: true,
+            sprint: true,
+            yaw: 0f,
+            pitch: 0f
+        );
+
+        player.ApplyInput(input);
+
+        // Приседание блокирует спринт
+        Assert.IsTrue(player.IsSneaking);
+        Assert.IsFalse(player.IsSprinting);
+
+        player.Velocity = Vector3.zero;
+        player.Tick(world, 0.05f);
+
+        // При спринте скорость была бы 0.1 * 1.3 * 0.546 = ~0.071
+        // При приседе скорость 0.1 * 0.3 * 0.546 = ~0.0164
+        float expectedSpeed = player.BaseMovementSpeed * player.SneakMultiplier * (0.6f * 0.91f);
+        Assert.AreEqual(expectedSpeed, player.Velocity.z, 0.001f);
+    }
+
+    [Test]
+    public void PlayerEntity_JumpInPlaceWithSprint_DoesNotMoveHorizontally()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        world.SetVoxel(0, 0, 0, new Voxel(BlockType.Stone));
+
+        var player = new PlayerEntity(1, new Vector3(0.5f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        // Стоим на месте (Movement = Vector2.zero), но зажат спринт (Sprint = true) и прыжок (Jump = true)
+        var input = new PlayerInput(
+            movement: Vector2.zero,
+            jump: true,
+            sneak: false,
+            sprint: true,
+            yaw: 45f,
+            pitch: 0f
+        );
+
+        player.ApplyInput(input);
+
+        // Спринт не должен активироваться без движения вперед
+        Assert.IsFalse(player.IsSprinting);
+        // Вертикальная скорость прыжка должна быть 0.42
+        Assert.AreEqual(0.42f, player.Velocity.y, 0.0001f);
+        // Горизонтальная скорость должна остаться строго нулевой (никакого толчка вперед на месте)
+        Assert.AreEqual(0.0f, player.Velocity.x, 0.0001f);
+        Assert.AreEqual(0.0f, player.Velocity.z, 0.0001f);
+    }
+
+    [Test]
+    public void LivingEntity_JumpApex_ReachesOneAndQuarterBlocks()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        for (int x = -1; x <= 1; x++)
+        {
+            for (int z = -1; z <= 1; z++)
+            {
+                world.SetVoxel(x, 0, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        var player = new PlayerEntity(1, new Vector3(0.5f, 1.0f, 0.5f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        player.Jump();
+
+        float maxElevation = 0f;
+        for (int tick = 0; tick < 20; tick++)
+        {
+            player.Tick(world, 0.05f);
+            float elevation = player.Position.y - 1.0f;
+            if (elevation > maxElevation)
+            {
+                maxElevation = elevation;
+            }
+        }
+
+        // В Minecraft Java apex прыжка составляет ровно ~1.2522 блока
+        Assert.Greater(maxElevation, 1.20f, "Jump apex must exceed 1.2 blocks to clear a 1-block obstacle");
+        Assert.Less(maxElevation, 1.30f, "Jump apex should not excessively exceed Minecraft Java physics (~1.25)");
+    }
+
+    [Test]
+    public void PlayerEntity_JumpOntoOneBlockObstacle_Succeeds()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        // Пол Y = 0 (поверхность Y = 1.0) на X = 0..4
+        for (int x = 0; x <= 4; x++)
+        {
+            for (int z = 0; z <= 2; z++)
+            {
+                world.SetVoxel(x, 0, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        // Препятствие в 1 блок на X = 2..4 (поверхность Y = 2.0)
+        for (int x = 2; x <= 4; x++)
+        {
+            for (int z = 0; z <= 2; z++)
+            {
+                world.SetVoxel(x, 1, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        // Игрок стартует перед препятствием на X = 1.4 (Max.x = 1.7), Y = 1.0, Z = 1.0, смотрит на восток (+X, Yaw = 90)
+        var player = new PlayerEntity(1, new Vector3(1.4f, 1.0f, 1.0f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        // Игрок совершает прыжок вперед на препятствие
+        bool landedOnObstacle = false;
+        for (int tick = 0; tick < 30; tick++)
+        {
+            // Прыжок на первом тике, затем игрок продолжает бежать вперед
+            var input = new PlayerInput(
+                movement: new Vector2(0f, 1f),
+                jump: tick == 0,
+                sneak: false,
+                sprint: true,
+                yaw: 90f,
+                pitch: 0f
+            );
+            player.ApplyInput(input);
+            player.Tick(world, 0.05f);
+
+            if (player.Position.y >= 1.99f && player.Position.x >= 1.8f && player.OnGround)
+            {
+                landedOnObstacle = true;
+                break;
+            }
+        }
+
+        // Игрок должен успешно запрыгнуть на блок X = 2 (ноги на Y = 2.0)
+        Assert.IsTrue(landedOnObstacle, "Player must land on top of the 1-block obstacle");
+        Assert.AreEqual(2.0f, player.Position.y, 0.001f, "Player must be firmly on the block surface (Y = 2.0)");
+        Assert.Greater(player.Position.x, 1.8f, "Player must have moved forward onto the block");
+        Assert.IsTrue(player.OnGround, "Player must be on ground on top of the obstacle");
+    }
+
+    [Test]
+    public void PlayerEntity_MovingIntoWall_JumpsContinuously()
+    {
+        var world = new World();
+        world.GetOrCreateChunk(Vector2Int.zero);
+        // Пол Y = 0 (поверхность Y = 1.0)
+        for (int x = 0; x <= 3; x++)
+        {
+            for (int z = 0; z <= 2; z++)
+            {
+                world.SetVoxel(x, 0, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        // Высокая стена в 3 блока на X = 2 (Y = 1..3)
+        for (int y = 1; y <= 3; y++)
+        {
+            for (int z = 0; z <= 2; z++)
+            {
+                world.SetVoxel(2, y, z, new Voxel(BlockType.Stone));
+            }
+        }
+
+        // Игрок прижат к стене: X = 1.7 (грань Max.x = 2.0), Y = 1.0, Z = 1.0, смотрит в стену (+X, Yaw = 90)
+        var player = new PlayerEntity(1, new Vector3(1.7f, 1.0f, 1.0f));
+        player.Move(world, new Vector3(0f, -0.05f, 0f));
+        Assert.IsTrue(player.OnGround);
+
+        var input = new PlayerInput(
+            movement: new Vector2(0f, 1f), // Постоянно жмет W в стену
+            jump: true,                   // Постоянно зажат Space
+            sneak: false,
+            sprint: false,
+            yaw: 90f,
+            pitch: 0f
+        );
+
+        int jumpsCount = 0;
+        bool wasAirborne = false;
+
+        // Симулируем 40 тиков (2 секунды)
+        for (int tick = 0; tick < 40; tick++)
+        {
+            player.ApplyInput(input);
+            player.Tick(world, 0.05f);
+
+            if (!player.OnGround && !wasAirborne)
+            {
+                jumpsCount++;
+                wasAirborne = true;
+            }
+            else if (player.OnGround)
+            {
+                wasAirborne = false;
+            }
+        }
+
+        // За 2 секунды (40 тиков) при цикле прыжка ~11-12 тиков должно совершиться не менее 3 непрерывных прыжков
+        Assert.GreaterOrEqual(jumpsCount, 3, "Player must jump continuously when holding Space against a wall without dropping jumps");
     }
 }

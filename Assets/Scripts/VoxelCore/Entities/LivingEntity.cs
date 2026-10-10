@@ -121,62 +121,32 @@ namespace VoxelCore.Entities
 
         /// <summary>
         /// Определяет коэффициент скольжения поверхности под ногами сущности.
+        /// По умолчанию возвращает базовое трение (0.6). При добавлении льда/слизи будет расширено.
         /// </summary>
         protected virtual float GetGroundSlipperiness(World world)
         {
-            if (world == null)
-            {
-                return DefaultGroundFriction;
-            }
-
-            int blockX = Mathf.FloorToInt(Position.x);
-            int blockY = Mathf.FloorToInt(Position.y - 0.1f);
-            int blockZ = Mathf.FloorToInt(Position.z);
-
-            Voxel voxel = world.GetVoxel(blockX, blockY, blockZ);
-            return voxel.IsSolid ? DefaultGroundFriction : DefaultGroundFriction;
+            return DefaultGroundFriction;
         }
 
         /// <summary>
         /// Полный шаг физической симуляции живой сущности (ускорение, перемещение, затухание).
+        /// Рассчитывается с фиксированным дискретным шагом Minecraft (20 TPS).
         /// </summary>
         public override void Tick(World world, float dt)
         {
-            float tickRatio = dt / 0.05f;
-
             // 1. Ускорение от вектора ввода (на земле полный импульс, в воздухе ослабленный контроль)
             float speed = GetCurrentSpeed();
-            if (OnGround)
-            {
-                MoveRelative(MovementInput, speed);
-            }
-            else
-            {
-                MoveRelative(MovementInput, speed * 0.2f);
-            }
+            MoveRelative(MovementInput, OnGround ? speed : speed * 0.2f);
 
-            // 2. Гравитация
-            Velocity = new Vector3(Velocity.x, Velocity.y - Gravity * tickRatio, Velocity.z);
+            // 2. Перемещение с осевым разрешением коллизий (выполняется ДО гравитации, как в Minecraft Java)
+            Move(world, Velocity);
 
-            // 3. Перемещение с осевым разрешением коллизий
-            Move(world, Velocity * tickRatio);
+            // 3. Гравитация (применяется после перемещения, обеспечивая прыжок 1.25 блока)
+            Velocity = new Vector3(Velocity.x, Velocity.y - Gravity, Velocity.z);
 
             // 4. Трение и сопротивление среды
-            float slipperiness = GetGroundSlipperiness(world);
-            float dragXZ = OnGround ? slipperiness * AirDrag : AirDrag;
-
-            if (Mathf.Approximately(tickRatio, 1.0f))
-            {
-                Velocity = new Vector3(Velocity.x * dragXZ, Velocity.y * VerticalDrag, Velocity.z * dragXZ);
-            }
-            else
-            {
-                Velocity = new Vector3(
-                    Velocity.x * Mathf.Pow(dragXZ, tickRatio),
-                    Velocity.y * Mathf.Pow(VerticalDrag, tickRatio),
-                    Velocity.z * Mathf.Pow(dragXZ, tickRatio)
-                );
-            }
+            float dragXZ = OnGround ? GetGroundSlipperiness(world) * AirDrag : AirDrag;
+            Velocity = new Vector3(Velocity.x * dragXZ, Velocity.y * VerticalDrag, Velocity.z * dragXZ);
         }
 
         public override EntityState CaptureState()
