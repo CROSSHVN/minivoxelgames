@@ -62,7 +62,25 @@
   * Алгоритм авто-подъема на ступени/полублоки (`StepHeight = 0f` по умолчанию, `0.6f` для игрока/мобов).
   * Флаги `OnGround`, `IsCollidedHorizontally`, `IsCollidedVertically`.
   * Сброс скорости по осям столкновений.
+  * Виртуальный хук `PreProcessMotion` для модификаций движения (Safe Walk).
   * Методы `CaptureState()` и `ApplyState()` для сериализации и реконсиляции.
+
+### `Entities/LivingEntity.cs`
+* Базовый класс для одушевленных сущностей (Игрок, Мобы):
+  * Углы взгляда `Yaw` и `Pitch`.
+  * Перемещение относительно взгляда `MoveRelative(input, speed)` с защитой от диагонального ускорения.
+  * Прыжок `Jump()` ($v_y = 0.42$).
+  * Физика гравитации ($0.08$), вертикального сопротивления ($0.98$) и трения поверхности блоков (`Slipperiness * 0.91`).
+  * `StepHeight = 0.6f`.
+
+### `Entities/PlayerInput.cs`
+* Неизменяемая структура пользовательского ввода за тик: `Movement` (Vector2), `Jump`, `Sneak`, `Sprint`, `Yaw`, `Pitch`.
+
+### `Entities/PlayerEntity.cs`
+* Сущность игрока (управление от клиента, клиентское предсказание):
+  * Применение ввода `ApplyInput(in PlayerInput input)`.
+  * Режимы `IsSneaking` (высота хитбокса уменьшается с $1.8$ до $1.5$) и `IsSprinting` (множитель скорости $1.3$).
+  * Защита от соскальзывания с обрыва при приседании (**Minecraft Safe Walk**): удерживает игрока на краю блока без падения в пустоту.
 
 ### `SubChunkNeighbors.cs` & `ChunkNeighbors.cs`
 * **Neighborhood Cache (Кэш соседства):**

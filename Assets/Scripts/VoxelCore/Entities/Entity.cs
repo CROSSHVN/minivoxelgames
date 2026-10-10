@@ -102,6 +102,15 @@ namespace VoxelCore.Entities
         public abstract void Tick(World world, float dt);
 
         /// <summary>
+        /// Предварительная обработка желаемого вектора движения перед выполнением коллизий.
+        /// Переопределяется в наследниках (например, защита от падения с края блока при приседании).
+        /// </summary>
+        protected virtual Vector3 PreProcessMotion(World world, Vector3 desiredMotion)
+        {
+            return desiredMotion;
+        }
+
+        /// <summary>
         /// Перемещение сущности на вектор <paramref name="desiredMotion"/> с осевым разрешением
         /// столкновений и авто-подъемом на ступени (Minecraft Swept AABB + StepHeight).
         /// </summary>
@@ -112,7 +121,10 @@ namespace VoxelCore.Entities
                 throw new ArgumentNullException(nameof(world));
             }
 
+            desiredMotion = PreProcessMotion(world, desiredMotion);
+
             AABB origBox = _boundingBox;
+            bool wasOnGround = OnGround;
 
             // Broadphase: расширяем AABB вектором смещения и высотой шага для сбора всех блоков-препятствий
             AABB sweptBox = _boundingBox.Expand(desiredMotion);
@@ -229,7 +241,17 @@ namespace VoxelCore.Entities
             // 4. Обновление флагов
             bool hitGroundNormally = desiredMotion.y < 0f && Mathf.Abs(allowedDy - desiredMotion.y) > AABB.Epsilon;
             bool landedOnStep = didStep && (stepDownY > -stepUpY + AABB.Epsilon);
-            OnGround = hitGroundNormally || landedOnStep;
+
+            bool stillOnGround = false;
+            if (wasOnGround && Mathf.Abs(allowedDy) <= AABB.Epsilon && desiredMotion.y <= 0f)
+            {
+                AABB groundTest = _boundingBox.Offset(new Vector3(0f, -AABB.Epsilon * 2f, 0f));
+                _collisionBuffer.Clear();
+                world.GetCollidingBoxes(groundTest, _collisionBuffer);
+                stillOnGround = _collisionBuffer.Count > 0;
+            }
+
+            OnGround = hitGroundNormally || landedOnStep || stillOnGround;
             IsCollidedHorizontally = Mathf.Abs(desiredMotion.x - allowedDx) > AABB.Epsilon ||
                                      Mathf.Abs(desiredMotion.z - allowedDz) > AABB.Epsilon;
             IsCollidedVertically = Mathf.Abs(desiredMotion.y - allowedDy) > AABB.Epsilon;
