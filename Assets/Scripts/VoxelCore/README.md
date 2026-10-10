@@ -51,6 +51,19 @@
 * Методы: `FromBlock`, `FromCenterAndSize`, `Expand`, `Offset`, `Intersects`.
 * **Minecraft Axial Resolution:** `CalculateXOffset`, `CalculateYOffset`, `CalculateZOffset` с защитой от микропроникновений и обратных толчков.
 
+### `Entities/EntityState.cs`
+* Блиттабельная структура состояния сущности (`38 байт`) для сетевых пакетов и предсказания клиента:
+  * `EntityId`, `Type`, `Position`, `Velocity`, `Yaw`, `Pitch`, `Flags` (`EntityFlags`).
+
+### `Entities/Entity.cs`
+* Базовый POCO-класс сущности воксельного мира (Zero GC на тиках).
+* Реализует классическое перемещение Minecraft Swept AABB:
+  * Осевое разрешение Y $\rightarrow$ X $\rightarrow$ Z.
+  * Алгоритм авто-подъема на ступени/полублоки (`StepHeight = 0f` по умолчанию, `0.6f` для игрока/мобов).
+  * Флаги `OnGround`, `IsCollidedHorizontally`, `IsCollidedVertically`.
+  * Сброс скорости по осям столкновений.
+  * Методы `CaptureState()` и `ApplyState()` для сериализации и реконсиляции.
+
 ### `SubChunkNeighbors.cs` & `ChunkNeighbors.cs`
 * **Neighborhood Cache (Кэш соседства):**
   * `SubChunkNeighbors`: легковесная readonly-структура, кэширующая 6 прямых соседей подчанка (Up, Down, North, South, East, West). Устраняет тысячи обращений к `World` и словарю `Dictionary<Vector2Int, Chunk>` при обходе границ.
